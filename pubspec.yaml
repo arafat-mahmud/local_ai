@@ -1,5 +1,5 @@
 name: local_ai
-description: "A new Flutter project."
+description: "Offline local AI app with in-app model downloader and updater."
 publish_to: 'none'
 
 version: 1.0.0+1
