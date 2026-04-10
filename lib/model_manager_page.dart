@@ -182,22 +182,31 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
                     ),
                     const SizedBox(height: 12),
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: <Widget>[
-                        Text(
-                          _service.hasKnownDownloadTotal
-                              ? 'Progress: ${(_service.downloadProgress * 100).toStringAsFixed(1)}%'
-                              : 'Progress: Downloading...',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
+                        Expanded(
+                          child: Text(
+                            _service.hasKnownDownloadTotal
+                                ? 'Progress: ${(_service.downloadProgress * 100).toStringAsFixed(1)}%'
+                                : 'Progress: Downloading...',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
-                        Text(
-                          _service.statusMessage,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontStyle: FontStyle.italic,
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            _service.statusMessage,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.right,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontStyle: FontStyle.italic,
+                            ),
                           ),
                         ),
                       ],
