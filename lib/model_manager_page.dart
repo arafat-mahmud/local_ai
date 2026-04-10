@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'chat_page.dart';
 import 'model_update_service.dart';
 
 const String kModelManifestUrl = String.fromEnvironment(
@@ -66,6 +67,18 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
         const SnackBar(content: Text('Download failed. Please try again.')),
       );
     }
+  }
+
+  Future<void> _openChat() async {
+    final InstalledModel? installed = _service.installedModel;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ChatPage(
+          modelReady: installed != null,
+          modelLabel: installed?.modelName ?? 'Local AI',
+        ),
+      ),
+    );
   }
 
   @override
@@ -246,6 +259,11 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
                       ? 'Update Model'
                       : 'Reinstall Model',
                 ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _openChat,
+                icon: const Icon(Icons.chat_bubble_outline_rounded),
+                label: const Text('Open Chat'),
               ),
             ],
           ),
