@@ -32,6 +32,18 @@ Use the provided [model_manifest.example.json](model_manifest.example.json) form
 flutter run --dart-define=MODEL_MANIFEST_URL="https://drive.google.com/uc?export=download&id=YOUR_MANIFEST_FILE_ID"
 ```
 
+## Google Drive: Which Files To Upload
+
+Upload these 2 files:
+
+1. Model binary file (example: `.gguf`)
+2. Manifest JSON file (same structure as `model_manifest.example.json`)
+
+Important:
+
+- Put the model file link inside manifest `file_url`.
+- Give the app only the manifest direct-download URL via `MODEL_MANIFEST_URL`.
+
 ## Release Update Flow
 
 1. Upload new model file to Google Drive.
