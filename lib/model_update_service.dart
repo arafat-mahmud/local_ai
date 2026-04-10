@@ -87,16 +87,15 @@ class RemoteModelManifest {
   }
 
   factory RemoteModelManifest.fromJson(Map<String, dynamic> json) {
-    final String fileUrl =
-        (json['file_url'] ?? json['url'] ?? '').toString().trim();
+    final String fileUrl = (json['file_url'] ?? json['url'] ?? '')
+        .toString()
+        .trim();
     final String fileName = (json['file_name'] ?? json['model_file_name'] ?? '')
         .toString()
         .trim();
 
     if (fileUrl.isEmpty) {
-      throw const FormatException(
-        'Manifest file_url is required.',
-      );
+      throw const FormatException('Manifest file_url is required.');
     }
 
     return RemoteModelManifest(
@@ -125,10 +124,14 @@ class ModelUpdateService extends ChangeNotifier {
   bool isCheckingForUpdates = false;
   bool isDownloading = false;
   double downloadProgress = 0.0;
+  int downloadBytesReceived = 0;
+  int? downloadTotalBytes;
   String statusMessage = 'Checking local model...';
   String? lastError;
 
   bool get hasInstalledModel => installedModel != null;
+  bool get hasKnownDownloadTotal =>
+      downloadTotalBytes != null && downloadTotalBytes! > 0;
 
   bool get hasUpdateAvailable {
     if (latestManifest == null) {
@@ -154,7 +157,7 @@ class ModelUpdateService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final RemoteModelManifest remote = await _downloadManifest();
+      final RemoteModelManifest remote = await _resolveRemoteModel();
       latestManifest = remote;
 
       if (!hasInstalledModel) {
@@ -170,7 +173,8 @@ class ModelUpdateService extends ChangeNotifier {
       if (hasInstalledModel) {
         statusMessage = 'Offline mode active. Installed model is ready.';
       } else {
-        statusMessage = 'Could not load model manifest. Please connect to internet.';
+        statusMessage =
+            'Could not load model manifest. Please connect to internet.';
       }
     } finally {
       isCheckingForUpdates = false;
@@ -193,8 +197,9 @@ class ModelUpdateService extends ChangeNotifier {
 
     final RemoteModelManifest model = latestManifest!;
     final Directory baseDir = await getApplicationSupportDirectory();
-    final Directory modelsDir =
-        Directory('${baseDir.path}/${config.storageFolderName}');
+    final Directory modelsDir = Directory(
+      '${baseDir.path}/${config.storageFolderName}',
+    );
     if (!modelsDir.existsSync()) {
       modelsDir.createSync(recursive: true);
     }
@@ -206,6 +211,8 @@ class ModelUpdateService extends ChangeNotifier {
 
     isDownloading = true;
     downloadProgress = 0;
+    downloadBytesReceived = 0;
+    downloadTotalBytes = null;
     lastError = null;
     statusMessage = 'Downloading ${model.modelName}...';
     notifyListeners();
@@ -220,9 +227,13 @@ class ModelUpdateService extends ChangeNotifier {
         tempFile.path,
         deleteOnError: true,
         onReceiveProgress: (int count, int total) {
+          downloadBytesReceived = count;
+          downloadTotalBytes = total > 0 ? total : null;
           if (total > 0) {
             downloadProgress = count / total;
           }
+          statusMessage =
+              'Downloading ${model.modelName} (${_readableBytes(count)} / ${_readableBytes(downloadTotalBytes)})';
           notifyListeners();
         },
       );
@@ -274,6 +285,8 @@ class ModelUpdateService extends ChangeNotifier {
       statusMessage = 'Model installed successfully. Offline AI is ready.';
       latestManifest = model;
       downloadProgress = 1.0;
+      downloadBytesReceived = destinationFile.lengthSync();
+      downloadTotalBytes = destinationFile.lengthSync();
     } catch (error) {
       lastError = error.toString();
       statusMessage = 'Model download failed. Please try again.';
@@ -307,7 +320,8 @@ class ModelUpdateService extends ChangeNotifier {
       } else {
         installedModel = null;
         await prefs.remove(_installedModelKey);
-        statusMessage = 'Model metadata found but file is missing. Please download again.';
+        statusMessage =
+            'Model metadata found but file is missing. Please download again.';
       }
     } catch (error) {
       installedModel = null;
@@ -343,6 +357,34 @@ class ModelUpdateService extends ChangeNotifier {
     throw const FormatException('Unsupported manifest format.');
   }
 
+  Future<RemoteModelManifest> _resolveRemoteModel() async {
+    try {
+      return await _downloadManifest();
+    } catch (error) {
+      if (!_shouldFallbackToDirectModel(error)) {
+        rethrow;
+      }
+      return _buildManifestFromDirectModelUrl(config.manifestUrl);
+    }
+  }
+
+  RemoteModelManifest _buildManifestFromDirectModelUrl(String url) {
+    final String directUrl = _toDirectDownloadUrl(url);
+    final String fileName = _fallbackFileName(directUrl);
+    final String modelName = _modelNameFromFile(fileName);
+
+    return RemoteModelManifest(
+      version: 'direct-link',
+      versionCode: 1,
+      modelName: modelName,
+      fileName: fileName,
+      fileUrl: directUrl,
+      fileSizeBytes: null,
+      notes:
+          'Direct model URL mode: provide a manifest URL later for proper versioned updates.',
+    );
+  }
+
   @override
   void dispose() {
     _dio.close(force: true);
@@ -356,7 +398,8 @@ class ModelUpdateService extends ChangeNotifier {
       sendTimeout: const Duration(seconds: 30),
       responseType: ResponseType.json,
       followRedirects: true,
-      validateStatus: (int? status) => status != null && status >= 200 && status < 400,
+      validateStatus: (int? status) =>
+          status != null && status >= 200 && status < 400,
     );
   }
 }
@@ -364,6 +407,13 @@ class ModelUpdateService extends ChangeNotifier {
 String _fallbackFileName(String url) {
   try {
     final Uri uri = Uri.parse(url);
+    final String? idValue = uri.queryParameters['id'];
+    if (idValue != null &&
+        idValue.isNotEmpty &&
+        uri.pathSegments.contains('download')) {
+      return 'model_$idValue.gguf';
+    }
+
     if (uri.pathSegments.isNotEmpty) {
       final String lastSegment = uri.pathSegments.last.trim();
       if (lastSegment.isNotEmpty && lastSegment != 'download') {
@@ -374,6 +424,18 @@ String _fallbackFileName(String url) {
     // No-op: fallback below.
   }
   return 'model.gguf';
+}
+
+String _modelNameFromFile(String fileName) {
+  final String name = fileName.trim();
+  if (name.isEmpty) {
+    return 'AI Model';
+  }
+  final int dotIndex = name.lastIndexOf('.');
+  if (dotIndex <= 0) {
+    return name;
+  }
+  return name.substring(0, dotIndex);
 }
 
 int? _parseInt(dynamic value) {
@@ -423,10 +485,19 @@ String _toDirectDownloadUrl(String rawUrl) {
   return Uri.https(
     'drive.usercontent.google.com',
     '/download',
-    <String, String>{
-      'id': fileId,
-      'export': 'download',
-      'confirm': 't',
-    },
+    <String, String>{'id': fileId, 'export': 'download', 'confirm': 't'},
   ).toString();
+}
+
+bool _shouldFallbackToDirectModel(Object error) {
+  if (error is FormatException) {
+    return true;
+  }
+  if (error is TypeError) {
+    return true;
+  }
+  if (error is DioException && error.type == DioExceptionType.badResponse) {
+    return true;
+  }
+  return false;
 }

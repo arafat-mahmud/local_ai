@@ -6,7 +6,8 @@ import 'model_update_service.dart';
 
 const String kModelManifestUrl = String.fromEnvironment(
   'MODEL_MANIFEST_URL',
-  defaultValue: 'https://drive.google.com/uc?export=download&id=YOUR_MANIFEST_FILE_ID',
+  defaultValue:
+      'https://drive.google.com/file/d/1b7qZTrj9CKrPjTORnygrYRjzTF2JNYmT/view?usp=share_link',
 );
 
 class ModelManagerPage extends StatefulWidget {
@@ -25,9 +26,7 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
   void initState() {
     super.initState();
     _service = ModelUpdateService(
-      config: const ModelUpdateConfig(
-        manifestUrl: kModelManifestUrl,
-      ),
+      config: const ModelUpdateConfig(manifestUrl: kModelManifestUrl),
     );
     _service.addListener(_onServiceChanged);
     unawaited(_service.initialize(autoCheckRemote: true));
@@ -78,9 +77,7 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
     final bool checking = _service.isCheckingForUpdates;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title),
-      ),
+      appBar: AppBar(title: Text(widget.title)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
@@ -123,7 +120,9 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
                     const Text('Not installed')
                   else ...<Widget>[
                     Text('Name: ${installed.modelName}'),
-                    Text('Version: ${installed.version} (${installed.versionCode})'),
+                    Text(
+                      'Version: ${installed.version} (${installed.versionCode})',
+                    ),
                     Text('File: ${installed.fileName}'),
                     Text('Size: ${_formatBytes(installed.fileSizeBytes)}'),
                   ],
@@ -158,9 +157,65 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
           ),
           if (downloading) ...<Widget>[
             const SizedBox(height: 16),
-            LinearProgressIndicator(value: _service.downloadProgress),
-            const SizedBox(height: 6),
-            Text('${(_service.downloadProgress * 100).toStringAsFixed(1)}%'),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    const Text(
+                      'Downloading Model...',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: _service.hasKnownDownloadTotal
+                            ? _service.downloadProgress
+                            : null,
+                        minHeight: 8,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: <Widget>[
+                        Text(
+                          _service.hasKnownDownloadTotal
+                              ? 'Progress: ${(_service.downloadProgress * 100).toStringAsFixed(1)}%'
+                              : 'Progress: Downloading...',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        Text(
+                          _service.statusMessage,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _service.hasKnownDownloadTotal
+                          ? '${_formatBytes(_service.downloadBytesReceived)} / ${_formatBytes(_service.downloadTotalBytes)}'
+                          : '${_formatBytes(_service.downloadBytesReceived)} downloaded',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
           const SizedBox(height: 16),
           Wrap(
@@ -179,8 +234,8 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
                   installed == null
                       ? 'Download Model'
                       : hasUpdate
-                          ? 'Update Model'
-                          : 'Reinstall Model',
+                      ? 'Update Model'
+                      : 'Reinstall Model',
                 ),
               ),
             ],

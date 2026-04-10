@@ -1,9 +1,9 @@
 {
   "version": "1.0.0",
   "version_code": 1,
-  "model_name": "SmolLM2-1.7B-Instruct-Q4_K_M",
-  "file_name": "SmolLM2-1.7B-Instruct-Q4_K_M.gguf",
-  "file_url": "https://drive.google.com/file/d/YOUR_MODEL_FILE_ID/view?usp=sharing",
-  "file_size_bytes": 1138166333,
+  "model_name": "SmolLM2-1.7B-Instruct-Q8_0",
+  "file_name": "SmolLM2-1.7B-Instruct-Q8_0.gguf",
+  "file_url": "https://drive.google.com/file/d/1b7qZTrj9CKrPjTORnygrYRjzTF2JNYmT/view?usp=share_link",
+  "file_size_bytes": 1820414944,
   "notes": "Initial release"
 }

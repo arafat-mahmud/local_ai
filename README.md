@@ -43,6 +43,7 @@ Important:
 
 - Put the model file link inside manifest `file_url`.
 - Give the app only the manifest direct-download URL via `MODEL_MANIFEST_URL`.
+- Compatibility mode: if you accidentally pass a direct model URL instead of manifest URL, the app can still download/install the model, but versioned update detection is limited until you switch back to manifest URL.
 
 ## Release Update Flow
 
