@@ -342,7 +342,11 @@ class ModelUpdateService extends ChangeNotifier {
     final String manifestUrl = _toDirectDownloadUrl(config.manifestUrl);
     final Response<dynamic> response = await _dio.get<dynamic>(
       manifestUrl,
-      options: Options(responseType: ResponseType.plain),
+      options: Options(
+        responseType: ResponseType.plain,
+        receiveTimeout: const Duration(seconds: 15),
+        headers: const <String, String>{'Range': 'bytes=0-262143'},
+      ),
     );
     final dynamic data = response.data;
 
@@ -354,23 +358,73 @@ class ModelUpdateService extends ChangeNotifier {
           jsonDecode(data) as Map<String, dynamic>;
       return RemoteModelManifest.fromJson(parsed);
     }
+    if (data is List<int>) {
+      final String text = utf8.decode(data, allowMalformed: true);
+      final Map<String, dynamic> parsed =
+          jsonDecode(text) as Map<String, dynamic>;
+      return RemoteModelManifest.fromJson(parsed);
+    }
     throw const FormatException('Unsupported manifest format.');
   }
 
   Future<RemoteModelManifest> _resolveRemoteModel() async {
+    final String directUrl = _toDirectDownloadUrl(config.manifestUrl);
+    final _RemoteProbe probe = await _probeRemoteResource(directUrl);
+
+    if (probe.isLikelyModelBinary) {
+      return _buildManifestFromDirectModelUrl(
+        config.manifestUrl,
+        inferredFileName: probe.fileName,
+        inferredFileSizeBytes: probe.contentLength,
+      );
+    }
+
     try {
       return await _downloadManifest();
     } catch (error) {
       if (!_shouldFallbackToDirectModel(error)) {
         rethrow;
       }
-      return _buildManifestFromDirectModelUrl(config.manifestUrl);
+      return _buildManifestFromDirectModelUrl(
+        config.manifestUrl,
+        inferredFileName: probe.fileName,
+        inferredFileSizeBytes: probe.contentLength,
+      );
     }
   }
 
-  RemoteModelManifest _buildManifestFromDirectModelUrl(String url) {
+  Future<_RemoteProbe> _probeRemoteResource(String directUrl) async {
+    try {
+      final Response<dynamic> head = await _dio.head<dynamic>(
+        directUrl,
+        options: Options(
+          receiveTimeout: const Duration(seconds: 10),
+          responseType: ResponseType.plain,
+        ),
+      );
+      return _RemoteProbe.fromHeaders(
+        url: directUrl,
+        contentType: head.headers.value(Headers.contentTypeHeader),
+        contentDisposition: head.headers.value('content-disposition'),
+        contentLength: _parseInt(
+          head.headers.value(Headers.contentLengthHeader),
+        ),
+      );
+    } catch (_) {
+      return _RemoteProbe(url: directUrl);
+    }
+  }
+
+  RemoteModelManifest _buildManifestFromDirectModelUrl(
+    String url, {
+    String? inferredFileName,
+    int? inferredFileSizeBytes,
+  }) {
     final String directUrl = _toDirectDownloadUrl(url);
-    final String fileName = _fallbackFileName(directUrl);
+    final String fileName =
+        (inferredFileName != null && inferredFileName.trim().isNotEmpty)
+        ? inferredFileName.trim()
+        : _fallbackFileName(directUrl);
     final String modelName = _modelNameFromFile(fileName);
 
     return RemoteModelManifest(
@@ -379,7 +433,7 @@ class ModelUpdateService extends ChangeNotifier {
       modelName: modelName,
       fileName: fileName,
       fileUrl: directUrl,
-      fileSizeBytes: null,
+      fileSizeBytes: inferredFileSizeBytes,
       notes:
           'Direct model URL mode: provide a manifest URL later for proper versioned updates.',
     );
@@ -500,4 +554,77 @@ bool _shouldFallbackToDirectModel(Object error) {
     return true;
   }
   return false;
+}
+
+class _RemoteProbe {
+  const _RemoteProbe({
+    required this.url,
+    this.contentType,
+    this.contentDisposition,
+    this.contentLength,
+  });
+
+  final String url;
+  final String? contentType;
+  final String? contentDisposition;
+  final int? contentLength;
+
+  String? get fileName =>
+      _extractFilenameFromContentDisposition(contentDisposition);
+
+  bool get isLikelyModelBinary {
+    final String type = (contentType ?? '').toLowerCase();
+    if (type.contains('application/json') || type.contains('text/json')) {
+      return false;
+    }
+    if (type.contains('application/octet-stream')) {
+      return true;
+    }
+    final String lowerUrl = url.toLowerCase();
+    if (lowerUrl.endsWith('.gguf') || lowerUrl.endsWith('.bin')) {
+      return true;
+    }
+    final String name = (fileName ?? '').toLowerCase();
+    if (name.endsWith('.gguf') || name.endsWith('.bin')) {
+      return true;
+    }
+    return false;
+  }
+
+  static _RemoteProbe fromHeaders({
+    required String url,
+    required String? contentType,
+    required String? contentDisposition,
+    required int? contentLength,
+  }) {
+    return _RemoteProbe(
+      url: url,
+      contentType: contentType,
+      contentDisposition: contentDisposition,
+      contentLength: contentLength,
+    );
+  }
+}
+
+String? _extractFilenameFromContentDisposition(String? value) {
+  if (value == null || value.isEmpty) {
+    return null;
+  }
+  final RegExp utfMatch = RegExp(
+    r"filename\*=UTF-8''([^;]+)",
+    caseSensitive: false,
+  );
+  final Match? utf = utfMatch.firstMatch(value);
+  if (utf != null && utf.groupCount >= 1) {
+    return Uri.decodeComponent(utf.group(1)!);
+  }
+  final RegExp simpleMatch = RegExp(
+    r'filename="([^"]+)"',
+    caseSensitive: false,
+  );
+  final Match? simple = simpleMatch.firstMatch(value);
+  if (simple != null && simple.groupCount >= 1) {
+    return simple.group(1);
+  }
+  return null;
 }
