@@ -76,6 +76,7 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
         builder: (_) => ChatPage(
           modelReady: installed != null,
           modelLabel: installed?.modelName ?? 'Local AI',
+          hasModelUpdate: _service.hasUpdateAvailable,
         ),
       ),
     );

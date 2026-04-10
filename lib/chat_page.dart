@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({
     super.key,
     required this.modelReady,
     required this.modelLabel,
+    required this.hasModelUpdate,
   });
 
   final bool modelReady;
   final String modelLabel;
+  final bool hasModelUpdate;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -17,6 +20,7 @@ class ChatPage extends StatefulWidget {
 class _ChatPageState extends State<ChatPage> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final List<GlobalKey> _messageKeys = <GlobalKey>[GlobalKey()];
 
   final List<_ChatMessage> _messages = <_ChatMessage>[
     const _ChatMessage(
@@ -24,14 +28,41 @@ class _ChatPageState extends State<ChatPage> {
       text: 'Hi. I am ready. Downloaded model can answer here in offline mode.',
     ),
   ];
+  final List<_HistoryEntry> _history = <_HistoryEntry>[];
 
   bool _isTyping = false;
+  String _appVersion = 'Loading...';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAppVersion();
+  }
 
   @override
   void dispose() {
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final PackageInfo info = await PackageInfo.fromPlatform();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _appVersion = '${info.version} (${info.buildNumber})';
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _appVersion = 'Unavailable';
+      });
+    }
   }
 
   void _sendMessage() {
@@ -41,7 +72,17 @@ class _ChatPageState extends State<ChatPage> {
     }
 
     setState(() {
+      final int userMessageIndex = _messages.length;
       _messages.add(_ChatMessage(role: _ChatRole.user, text: input));
+      _messageKeys.add(GlobalKey());
+      _history.insert(
+        0,
+        _HistoryEntry(
+          label: input,
+          messageIndex: userMessageIndex,
+          createdAt: DateTime.now(),
+        ),
+      );
       _isTyping = true;
       _controller.clear();
     });
@@ -60,6 +101,7 @@ class _ChatPageState extends State<ChatPage> {
                 : 'Model is not installed yet. Please install model first from previous screen.',
           ),
         );
+        _messageKeys.add(GlobalKey());
         _isTyping = false;
       });
       _scrollToBottom();
@@ -77,6 +119,43 @@ class _ChatPageState extends State<ChatPage> {
         curve: Curves.easeOut,
       );
     });
+  }
+
+  void _jumpToHistory(_HistoryEntry entry) {
+    Navigator.of(context).pop();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final BuildContext? targetContext =
+          _messageKeys[entry.messageIndex].currentContext;
+      if (targetContext != null) {
+        Scrollable.ensureVisible(
+          targetContext,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOut,
+          alignment: 0.2,
+        );
+      }
+    });
+  }
+
+  Future<void> _openSettings() async {
+    Navigator.of(context).pop();
+    final _SettingsAction? action = await Navigator.of(context)
+        .push<_SettingsAction>(
+          MaterialPageRoute<_SettingsAction>(
+            builder: (_) => _ChatSettingsPage(
+              modelReady: widget.modelReady,
+              modelLabel: widget.modelLabel,
+              hasModelUpdate: widget.hasModelUpdate,
+              appVersion: _appVersion,
+            ),
+          ),
+        );
+    if (!mounted) {
+      return;
+    }
+    if (action == _SettingsAction.openModelHub) {
+      Navigator.of(context).pop();
+    }
   }
 
   @override
@@ -114,6 +193,67 @@ class _ChatPageState extends State<ChatPage> {
           ),
         ],
       ),
+      drawer: Drawer(
+        child: SafeArea(
+          child: Column(
+            children: <Widget>[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                color: const Color(0xFFF2F6FD),
+                child: const Text(
+                  'Menu',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.settings_outlined),
+                title: const Text('Settings'),
+                subtitle: const Text('Model update and app version'),
+                onTap: _openSettings,
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  children: <Widget>[
+                    const ListTile(
+                      title: Text(
+                        'History',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      dense: true,
+                    ),
+                    if (_history.isEmpty)
+                      const ListTile(
+                        leading: Icon(Icons.history_toggle_off_rounded),
+                        title: Text('No chat history yet'),
+                        dense: true,
+                      )
+                    else
+                      ..._history.map((entry) {
+                        return ListTile(
+                          leading: const Icon(
+                            Icons.chat_bubble_outline_rounded,
+                          ),
+                          title: Text(
+                            entry.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            '${entry.createdAt.hour.toString().padLeft(2, '0')}:${entry.createdAt.minute.toString().padLeft(2, '0')}',
+                          ),
+                          onTap: () => _jumpToHistory(entry),
+                        );
+                      }),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -134,7 +274,10 @@ class _ChatPageState extends State<ChatPage> {
                     return const _TypingBubble();
                   }
                   final _ChatMessage message = _messages[index];
-                  return _ChatBubble(message: message);
+                  return _ChatBubble(
+                    key: _messageKeys[index],
+                    message: message,
+                  );
                 },
               ),
             ),
@@ -193,7 +336,106 @@ class _ChatPageState extends State<ChatPage> {
   }
 }
 
+enum _SettingsAction { openModelHub }
+
+class _ChatSettingsPage extends StatelessWidget {
+  const _ChatSettingsPage({
+    required this.modelReady,
+    required this.modelLabel,
+    required this.hasModelUpdate,
+    required this.appVersion,
+  });
+
+  final bool modelReady;
+  final String modelLabel;
+  final bool hasModelUpdate;
+  final String appVersion;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Settings')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: <Widget>[
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  const Text(
+                    'Model Settings',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(modelReady ? 'Installed: $modelLabel' : 'Not installed'),
+                  const SizedBox(height: 8),
+                  Text(
+                    hasModelUpdate
+                        ? 'Update available for model.'
+                        : 'No model update info right now.',
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).pop(_SettingsAction.openModelHub);
+                    },
+                    icon: const Icon(Icons.system_update_alt_rounded),
+                    label: const Text('Open Download/Update Page'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  const Text(
+                    'App Version',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Text('Current: $appVersion'),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Current app version is $appVersion'),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.verified_outlined),
+                    label: const Text('Check App Version'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 enum _ChatRole { user, assistant }
+
+class _HistoryEntry {
+  const _HistoryEntry({
+    required this.label,
+    required this.messageIndex,
+    required this.createdAt,
+  });
+
+  final String label;
+  final int messageIndex;
+  final DateTime createdAt;
+}
 
 class _ChatMessage {
   const _ChatMessage({required this.role, required this.text});
@@ -203,7 +445,7 @@ class _ChatMessage {
 }
 
 class _ChatBubble extends StatelessWidget {
-  const _ChatBubble({required this.message});
+  const _ChatBubble({super.key, required this.message});
 
   final _ChatMessage message;
 
