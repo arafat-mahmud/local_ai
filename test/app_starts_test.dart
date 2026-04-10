@@ -9,5 +9,6 @@ void main() {
     expect(find.text('Local AI'), findsWidgets);
     expect(find.text('Model Status'), findsOneWidget);
     expect(find.textContaining('Download Model'), findsOneWidget);
+    expect(find.textContaining('Google Drive setup:'), findsOneWidget);
   });
 }
