@@ -42,3 +42,8 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Required by Flutter deferred components classes referenced during R8 shrink.
+    implementation("com.google.android.play:core:1.10.3")
+}

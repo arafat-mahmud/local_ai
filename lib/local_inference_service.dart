@@ -2,10 +2,14 @@ import 'dart:async';
 
 import 'package:fllama/fllama.dart';
 import 'package:fllama/fllama_type.dart';
+import 'package:flutter/services.dart';
 
 import 'chat_types.dart';
 
 class LocalInferenceService {
+  static const String _systemInstruction =
+      'You are a helpful offline AI assistant inside a mobile app. Keep answers concise and clear.';
+
   double? _contextId;
   bool _isBusy = false;
 
@@ -52,8 +56,7 @@ class LocalInferenceService {
       final List<RoleContent> messages = <RoleContent>[
         RoleContent(
           role: 'system',
-          content:
-              'You are a helpful offline AI assistant inside a mobile app. Keep answers concise and clear.',
+          content: _systemInstruction,
         ),
         ...history.map((ChatTurn turn) {
           return RoleContent(
@@ -62,12 +65,27 @@ class LocalInferenceService {
           );
         }),
       ];
-      final String formattedPrompt =
-          await Fllama.instance()?.getFormattedChat(
-            contextId,
-            messages: messages,
-          ) ??
-          '';
+      String formattedPrompt;
+      try {
+        formattedPrompt =
+            await Fllama.instance()?.getFormattedChat(
+              contextId,
+              messages: messages,
+            ) ??
+            '';
+      } on PlatformException catch (error) {
+        final bool isAndroidMessageCastBug =
+            (error.message ?? '').contains(
+              'ArrayList cannot be cast to java.util.HashMap[]',
+            ) ||
+            (error.details?.toString() ?? '').contains(
+              'ArrayList cannot be cast to java.util.HashMap[]',
+            );
+        if (!isAndroidMessageCastBug) {
+          rethrow;
+        }
+        formattedPrompt = _buildPromptFallback(history);
+      }
       final Map<Object?, dynamic>? result = await Fllama.instance()?.completion(
         contextId,
         prompt: formattedPrompt,
@@ -90,6 +108,20 @@ class LocalInferenceService {
     } finally {
       _isBusy = false;
     }
+  }
+
+  String _buildPromptFallback(List<ChatTurn> history) {
+    final StringBuffer buffer = StringBuffer()
+      ..writeln('System: $_systemInstruction')
+      ..writeln();
+    for (final ChatTurn turn in history) {
+      final String role = turn.role == ChatRole.user ? 'User' : 'Assistant';
+      buffer
+        ..writeln('$role: ${turn.text}')
+        ..writeln();
+    }
+    buffer.write('Assistant:');
+    return buffer.toString();
   }
 
   Future<void> dispose() async {
