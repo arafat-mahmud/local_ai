@@ -409,12 +409,24 @@ class ModelUpdateService extends ChangeNotifier {
       return RemoteModelManifest.fromJson(data);
     }
     if (data is String) {
+      final String trimmed = data.trimLeft();
+      if (_looksLikeHtmlText(trimmed)) {
+        throw const FormatException(
+          'MODEL_MANIFEST_URL is not a manifest JSON file. Use your manifest JSON direct-download URL (not the model file link).',
+        );
+      }
       final Map<String, dynamic> parsed =
           jsonDecode(data) as Map<String, dynamic>;
       return RemoteModelManifest.fromJson(parsed);
     }
     if (data is List<int>) {
       final String text = utf8.decode(data, allowMalformed: true);
+      final String trimmed = text.trimLeft();
+      if (_looksLikeHtmlText(trimmed)) {
+        throw const FormatException(
+          'MODEL_MANIFEST_URL is not a manifest JSON file. Use your manifest JSON direct-download URL (not the model file link).',
+        );
+      }
       final Map<String, dynamic> parsed =
           jsonDecode(text) as Map<String, dynamic>;
       return RemoteModelManifest.fromJson(parsed);
@@ -690,6 +702,14 @@ bool _looksLikeHtmlResponse(String? contentType) {
   final String normalized = (contentType ?? '').toLowerCase();
   return normalized.contains('text/html') ||
       normalized.contains('application/xhtml+xml');
+}
+
+bool _looksLikeHtmlText(String text) {
+  final String lower = text.toLowerCase();
+  return lower.startsWith('<!doctype html') ||
+      lower.startsWith('<html') ||
+      lower.contains('<head') ||
+      lower.contains('<body');
 }
 
 bool _looksLikeHtmlFile(File file) {

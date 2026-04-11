@@ -8,7 +8,7 @@ import 'model_update_service.dart';
 const String kModelManifestUrl = String.fromEnvironment(
   'MODEL_MANIFEST_URL',
   defaultValue:
-      'https://drive.google.com/file/d/1b7qZTrj9CKrPjTORnygrYRjzTF2JNYmT/view?usp=share_link',
+      'https://drive.google.com/uc?export=download&id=1iRH0TAJsP6wvL9JxWKGOIEdW14A1RxsD',
 );
 
 class ModelManagerPage extends StatefulWidget {
