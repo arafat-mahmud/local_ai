@@ -332,6 +332,12 @@ class ModelUpdateService extends ChangeNotifier {
         return;
       }
 
+      // Avoid showing a misleading 100% progress when only a tiny HTML
+      // interstitial/error page was downloaded from Google Drive.
+      downloadProgress = 0;
+      downloadBytesReceived = 0;
+      downloadTotalBytes = null;
+
       final String html = _readTextHead(tempFile);
       final String? driveError = _extractGoogleDriveErrorMessage(html);
       if (driveError != null) {
