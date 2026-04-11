@@ -606,6 +606,39 @@ String _readableBytes(int? bytes) {
 String _toDirectDownloadUrl(String rawUrl) {
   final Uri uri = Uri.parse(rawUrl);
 
+  final String host = uri.host.toLowerCase();
+  if (host.contains('huggingface.co')) {
+    final List<String> segments = List<String>.from(uri.pathSegments);
+    final int blobIndex = segments.indexOf('blob');
+    if (blobIndex != -1) {
+      segments[blobIndex] = 'resolve';
+      return uri.replace(pathSegments: segments).toString();
+    }
+    if (segments.contains('resolve')) {
+      return rawUrl;
+    }
+  }
+
+  if (host == 'github.com') {
+    final List<String> segments = List<String>.from(uri.pathSegments);
+    final int blobIndex = segments.indexOf('blob');
+    if (blobIndex != -1 && segments.length > blobIndex + 1) {
+      final String owner = segments.isNotEmpty ? segments[0] : '';
+      final String repo = segments.length > 1 ? segments[1] : '';
+      final String branch = segments[blobIndex + 1];
+      final List<String> filePathSegments = segments.sublist(blobIndex + 2);
+      if (owner.isNotEmpty &&
+          repo.isNotEmpty &&
+          branch.isNotEmpty &&
+          filePathSegments.isNotEmpty) {
+        return Uri.https(
+          'raw.githubusercontent.com',
+          '/$owner/$repo/$branch/${filePathSegments.join('/')}',
+        ).toString();
+      }
+    }
+  }
+
   if (!uri.host.contains('drive.google.com')) {
     return rawUrl;
   }

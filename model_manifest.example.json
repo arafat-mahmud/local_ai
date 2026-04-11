@@ -1,9 +1,9 @@
 {
-  "version": "1.0.2",
-  "version_code": 3,
-  "model_name": "SmolLM2-1.7B-Instruct-Q8_0",
-  "file_name": "SmolLM2-1.7B-Instruct-Q8_0.gguf",
-   "file_url": "https://huggingface.co/arafat-mahmud/smollm2-1.7b-q8-local-ai/resolve/main/SmolLM2-1.7B-Instruct-Q8_0.gguf",
-  "file_size_bytes": 1820414944,
-  "notes": "Updated model file link"
+  "version": "1.0.0+1",
+  "version_code": 1,
+  "model_name": "Qwen2.5-0.5B-Instruct-Q2_K",
+  "file_name": "qwen2.5-0.5b-instruct-q2_k.gguf",
+  "file_url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q2_k.gguf",
+  "file_size_bytes": 415182688,
+  "notes": "Latest 2.O"
 }
