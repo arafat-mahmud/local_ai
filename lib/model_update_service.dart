@@ -222,29 +222,11 @@ class ModelUpdateService extends ChangeNotifier {
         tempFile.deleteSync();
       }
 
-      final Response<dynamic> response = await _dio.download(
-        downloadUrl,
-        tempFile.path,
-        deleteOnError: true,
-        onReceiveProgress: (int count, int total) {
-          downloadBytesReceived = count;
-          downloadTotalBytes = total > 0 ? total : null;
-          if (total > 0) {
-            downloadProgress = count / total;
-          }
-          statusMessage =
-              'Downloading ${model.modelName} (${_readableBytes(count)} / ${_readableBytes(downloadTotalBytes)})';
-          notifyListeners();
-        },
+      await _downloadModelFile(
+        initialUrl: downloadUrl,
+        tempFile: tempFile,
+        modelName: model.modelName,
       );
-
-      final String contentType =
-          response.headers.value(Headers.contentTypeHeader) ?? '';
-      if (contentType.contains('text/html')) {
-        throw const FormatException(
-          'Download URL returned HTML instead of model binary. Check Google Drive sharing/direct link.',
-        );
-      }
 
       if (!tempFile.existsSync()) {
         throw const FileSystemException('Downloaded file not found.');
@@ -298,6 +280,79 @@ class ModelUpdateService extends ChangeNotifier {
       isDownloading = false;
       notifyListeners();
     }
+  }
+
+  Future<void> _downloadModelFile({
+    required String initialUrl,
+    required File tempFile,
+    required String modelName,
+  }) async {
+    String url = initialUrl;
+    String? cookieHeader;
+
+    for (int attempt = 0; attempt < 4; attempt++) {
+      final Map<String, String> requestHeaders = <String, String>{};
+      if (cookieHeader != null && cookieHeader.isNotEmpty) {
+        requestHeaders[HttpHeaders.cookieHeader] = cookieHeader;
+      }
+
+      final Response<dynamic> response = await _dio.download(
+        url,
+        tempFile.path,
+        deleteOnError: true,
+        options: requestHeaders.isEmpty
+            ? null
+            : Options(headers: requestHeaders),
+        onReceiveProgress: (int count, int total) {
+          downloadBytesReceived = count;
+          downloadTotalBytes = total > 0 ? total : null;
+          if (total > 0) {
+            downloadProgress = count / total;
+          }
+          statusMessage =
+              'Downloading $modelName (${_readableBytes(count)} / ${_readableBytes(downloadTotalBytes)})';
+          notifyListeners();
+        },
+      );
+
+      final String contentType =
+          response.headers.value(Headers.contentTypeHeader) ?? '';
+      final bool looksHtml =
+          _looksLikeHtmlResponse(contentType) || _looksLikeHtmlFile(tempFile);
+      if (!looksHtml) {
+        return;
+      }
+
+      final String html = _readTextHead(tempFile);
+      final String? driveError = _extractGoogleDriveErrorMessage(html);
+      if (driveError != null) {
+        throw StateError(driveError);
+      }
+
+      final String? mergedCookie = _mergeSetCookies(
+        existingCookieHeader: cookieHeader,
+        setCookieHeaders: response.headers.map[HttpHeaders.setCookieHeader],
+      );
+      if (mergedCookie != null && mergedCookie.isNotEmpty) {
+        cookieHeader = mergedCookie;
+      }
+
+      final String? retryUrl = _extractGoogleDriveConfirmedDownloadUrl(
+        html: html,
+        originalUrl: url,
+      );
+      if (retryUrl == null || retryUrl == url) {
+        break;
+      }
+
+      statusMessage = 'Confirming Google Drive download and retrying...';
+      notifyListeners();
+      url = retryUrl;
+    }
+
+    throw const FormatException(
+      'Download URL returned HTML instead of model binary. Check Google Drive sharing/direct link.',
+    );
   }
 
   Future<void> _loadInstalledModel() async {
@@ -536,11 +591,10 @@ String _toDirectDownloadUrl(String rawUrl) {
     return rawUrl;
   }
 
-  return Uri.https(
-    'drive.usercontent.google.com',
-    '/download',
-    <String, String>{'id': fileId, 'export': 'download', 'confirm': 't'},
-  ).toString();
+  return Uri.https('drive.google.com', '/uc', <String, String>{
+    'id': fileId,
+    'export': 'download',
+  }).toString();
 }
 
 bool _shouldFallbackToDirectModel(Object error) {
@@ -627,4 +681,185 @@ String? _extractFilenameFromContentDisposition(String? value) {
     return simple.group(1);
   }
   return null;
+}
+
+bool _looksLikeHtmlResponse(String? contentType) {
+  final String normalized = (contentType ?? '').toLowerCase();
+  return normalized.contains('text/html') ||
+      normalized.contains('application/xhtml+xml');
+}
+
+bool _looksLikeHtmlFile(File file) {
+  if (!file.existsSync()) {
+    return false;
+  }
+  final String head = _readTextHead(file).toLowerCase();
+  return head.contains('<!doctype html') ||
+      head.contains('<html') ||
+      head.contains('<head') ||
+      head.contains('google drive');
+}
+
+String _readTextHead(File file, {int maxBytes = 262144}) {
+  final RandomAccessFile raf = file.openSync(mode: FileMode.read);
+  try {
+    final int length = raf.lengthSync();
+    final int toRead = length < maxBytes ? length : maxBytes;
+    final List<int> bytes = raf.readSync(toRead);
+    return utf8.decode(bytes, allowMalformed: true);
+  } finally {
+    raf.closeSync();
+  }
+}
+
+String? _extractGoogleDriveConfirmedDownloadUrl({
+  required String html,
+  required String originalUrl,
+}) {
+  if (html.isEmpty) {
+    return null;
+  }
+
+  final Uri original = Uri.parse(originalUrl);
+  final Uri base = Uri(
+    scheme: original.scheme.isEmpty ? 'https' : original.scheme,
+    host: original.host,
+  );
+
+  final RegExp formActionPattern = RegExp(
+    r'<form[^>]*action="([^"]+)"[^>]*>',
+    caseSensitive: false,
+  );
+  final Match? formMatch = formActionPattern.firstMatch(html);
+  if (formMatch != null && formMatch.groupCount >= 1) {
+    String action = _decodeHtmlEntities(formMatch.group(1)!);
+    final Uri actionUri = base.resolve(action);
+
+    final Map<String, String> params = <String, String>{};
+    final RegExp inputPattern = RegExp(
+      r'<input[^>]*name="([^"]+)"[^>]*value="([^"]*)"[^>]*>',
+      caseSensitive: false,
+    );
+    for (final Match match in inputPattern.allMatches(html)) {
+      final String key = _decodeHtmlEntities(match.group(1)!);
+      final String value = _decodeHtmlEntities(match.group(2)!);
+      params[key] = value;
+    }
+    if (params.containsKey('id') && params['id']!.isNotEmpty) {
+      params.putIfAbsent('export', () => 'download');
+      if (!params.containsKey('confirm') || params['confirm']!.isEmpty) {
+        params['confirm'] = 't';
+      }
+      action = actionUri.replace(queryParameters: params).toString();
+      return action;
+    }
+  }
+
+  final RegExp hrefPattern = RegExp(r'href="([^"]+)"', caseSensitive: false);
+  for (final Match match in hrefPattern.allMatches(html)) {
+    String candidate = _decodeHtmlEntities(match.group(1)!);
+    if (!candidate.contains('confirm=')) {
+      continue;
+    }
+    final Uri resolved = base.resolve(candidate);
+    final String host = resolved.host.toLowerCase();
+    if (host.contains('google.com') || host.contains('googleusercontent.com')) {
+      return resolved.toString();
+    }
+  }
+
+  final RegExp escapedUrlPattern = RegExp(
+    r'https:\\/\\/[^"\\]+confirm=[^"\\]+',
+    caseSensitive: false,
+  );
+  final Match? escapedUrl = escapedUrlPattern.firstMatch(html);
+  if (escapedUrl != null) {
+    final String decoded = escapedUrl
+        .group(0)!
+        .replaceAll(r'\/', '/')
+        .replaceAll(r'\u003d', '=')
+        .replaceAll(r'\u0026', '&');
+    return _decodeHtmlEntities(decoded);
+  }
+
+  return null;
+}
+
+String _decodeHtmlEntities(String input) {
+  return input
+      .replaceAll('&amp;', '&')
+      .replaceAll('&#39;', "'")
+      .replaceAll('&quot;', '"')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>');
+}
+
+String? _extractGoogleDriveErrorMessage(String html) {
+  final String lower = html.toLowerCase();
+  if (lower.contains('quota exceeded') ||
+      lower.contains('too many users have viewed or downloaded this file')) {
+    return 'Google Drive quota exceeded for this file. Create a copy/re-upload the model to your own Drive or use another host, then update the model URL.';
+  }
+  if (lower.contains('you need access') ||
+      lower.contains('request access') ||
+      lower.contains('access denied')) {
+    return 'Google Drive file is not publicly accessible. Set link sharing to "Anyone with the link can view" and try again.';
+  }
+  if (lower.contains('file you have requested does not exist') ||
+      lower.contains('sorry, the file you have requested does not exist')) {
+    return 'Google Drive file was not found. Check the file link/id in the manifest.';
+  }
+  return null;
+}
+
+String? _mergeSetCookies({
+  required String? existingCookieHeader,
+  required List<String>? setCookieHeaders,
+}) {
+  if ((existingCookieHeader == null || existingCookieHeader.isEmpty) &&
+      (setCookieHeaders == null || setCookieHeaders.isEmpty)) {
+    return null;
+  }
+
+  final Map<String, String> cookies = <String, String>{};
+
+  if (existingCookieHeader != null && existingCookieHeader.isNotEmpty) {
+    for (final String part in existingCookieHeader.split(';')) {
+      final List<String> kv = part.split('=');
+      if (kv.length < 2) {
+        continue;
+      }
+      final String key = kv.first.trim();
+      final String value = kv.sublist(1).join('=').trim();
+      if (key.isNotEmpty && value.isNotEmpty) {
+        cookies[key] = value;
+      }
+    }
+  }
+
+  if (setCookieHeaders != null) {
+    for (final String header in setCookieHeaders) {
+      final List<String> segments = header.split(';');
+      if (segments.isEmpty) {
+        continue;
+      }
+      final String first = segments.first;
+      final int eq = first.indexOf('=');
+      if (eq <= 0) {
+        continue;
+      }
+      final String key = first.substring(0, eq).trim();
+      final String value = first.substring(eq + 1).trim();
+      if (key.isNotEmpty && value.isNotEmpty) {
+        cookies[key] = value;
+      }
+    }
+  }
+
+  if (cookies.isEmpty) {
+    return null;
+  }
+  return cookies.entries
+      .map((MapEntry<String, String> e) => '${e.key}=${e.value}')
+      .join('; ');
 }
