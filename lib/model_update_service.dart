@@ -437,21 +437,18 @@ class ModelUpdateService extends ChangeNotifier {
   Future<RemoteModelManifest> _resolveRemoteModel() async {
     final String directUrl = _toDirectDownloadUrl(config.manifestUrl);
     final _RemoteProbe probe = await _probeRemoteResource(directUrl);
-
-    if (probe.isLikelyModelBinary) {
-      return _buildManifestFromDirectModelUrl(
-        config.manifestUrl,
-        inferredFileName: probe.fileName,
-        inferredFileSizeBytes: probe.contentLength,
-      );
-    }
+    final bool explicitDirectModelLink = _isLikelyDirectModelLink(
+      config.manifestUrl,
+      directUrl,
+    );
 
     try {
       return await _downloadManifest();
     } catch (error) {
       final bool allowDirectFallback =
-          probe.isLikelyModelBinary ||
-          _isLikelyDirectModelLink(config.manifestUrl, directUrl);
+          explicitDirectModelLink ||
+          (probe.isLikelyModelBinary &&
+              !_looksLikeManifestFileName(probe.fileName));
       if (!allowDirectFallback || !_shouldFallbackToDirectModel(error)) {
         rethrow;
       }
@@ -643,6 +640,10 @@ class _RemoteProbe {
 
   bool get isLikelyModelBinary {
     final String type = (contentType ?? '').toLowerCase();
+    final String fileNameLower = (fileName ?? '').toLowerCase();
+    if (_looksLikeManifestFileName(fileNameLower)) {
+      return false;
+    }
     if (type.contains('application/json') || type.contains('text/json')) {
       return false;
     }
@@ -673,6 +674,17 @@ class _RemoteProbe {
       contentLength: contentLength,
     );
   }
+}
+
+bool _looksLikeManifestFileName(String? fileName) {
+  if (fileName == null) {
+    return false;
+  }
+  final String lower = fileName.trim().toLowerCase();
+  if (lower.isEmpty) {
+    return false;
+  }
+  return lower.endsWith('.json') || lower.contains('manifest');
 }
 
 String? _extractFilenameFromContentDisposition(String? value) {

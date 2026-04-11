@@ -1,6 +1,6 @@
 {
-  "version": "1.0.0",
-  "version_code": 1,
+  "version": "1.0.1",
+  "version_code": 2,
   "model_name": "SmolLM2-1.7B-Instruct-Q8_0",
   "file_name": "SmolLM2-1.7B-Instruct-Q8_0.gguf",
   "file_url": "https://drive.google.com/file/d/1b7qZTrj9CKrPjTORnygrYRjzTF2JNYmT/view?usp=share_link",
