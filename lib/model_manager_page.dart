@@ -77,6 +77,7 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
           modelReady: installed != null,
           modelLabel: installed?.modelName ?? 'Local AI',
           hasModelUpdate: _service.hasUpdateAvailable,
+          modelFilePath: installed?.filePath,
         ),
       ),
     );

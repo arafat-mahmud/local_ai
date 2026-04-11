@@ -1,17 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'chat_storage_service.dart';
+import 'chat_types.dart';
+import 'local_inference_service.dart';
+
 class ChatPage extends StatefulWidget {
   const ChatPage({
     super.key,
     required this.modelReady,
     required this.modelLabel,
     required this.hasModelUpdate,
+    this.modelFilePath,
   });
 
   final bool modelReady;
   final String modelLabel;
   final bool hasModelUpdate;
+  final String? modelFilePath;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -20,29 +26,30 @@ class ChatPage extends StatefulWidget {
 class _ChatPageState extends State<ChatPage> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final List<GlobalKey> _messageKeys = <GlobalKey>[GlobalKey()];
+  final List<GlobalKey> _messageKeys = <GlobalKey>[];
+  final ChatStorageService _storage = ChatStorageService.instance;
+  final LocalInferenceService _inference = LocalInferenceService();
 
-  final List<_ChatMessage> _messages = <_ChatMessage>[
-    const _ChatMessage(
-      role: _ChatRole.assistant,
-      text: 'Hi. I am ready. Downloaded model can answer here in offline mode.',
-    ),
-  ];
-  final List<_HistoryEntry> _history = <_HistoryEntry>[];
+  List<_ChatMessage> _messages = <_ChatMessage>[];
+  List<ChatSessionRecord> _sessions = <ChatSessionRecord>[];
+  String? _activeSessionId;
 
   bool _isTyping = false;
+  bool _isPreparingModel = false;
   String _appVersion = 'Loading...';
 
   @override
   void initState() {
     super.initState();
     _loadAppVersion();
+    _initializeChatData();
   }
 
   @override
   void dispose() {
     _controller.dispose();
     _scrollController.dispose();
+    _inference.dispose();
     super.dispose();
   }
 
@@ -65,47 +72,213 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  void _sendMessage() {
+  Future<void> _initializeChatData() async {
+    await _refreshSessions();
+    if (_sessions.isEmpty) {
+      await _createAndSwitchToNewSession();
+      return;
+    }
+    await _switchSession(_sessions.first.id, closeDrawer: false);
+  }
+
+  Future<void> _refreshSessions() async {
+    final List<ChatSessionRecord> sessions = await _storage.listSessions();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _sessions = sessions;
+    });
+  }
+
+  Future<void> _createAndSwitchToNewSession() async {
+    final DateTime now = DateTime.now();
+    final String sessionId = 'session_${now.microsecondsSinceEpoch}';
+    await _storage.createSession(
+      id: sessionId,
+      title: 'New Chat',
+      createdAtIso: now.toIso8601String(),
+    );
+    await _storage.addMessage(
+      sessionId: sessionId,
+      role: 'assistant',
+      text: 'Hi. I am ready. Downloaded model can answer here in offline mode.',
+      createdAtIso: now.toIso8601String(),
+    );
+    await _refreshSessions();
+    await _switchSession(sessionId, closeDrawer: false);
+  }
+
+  Future<void> _switchSession(
+    String sessionId, {
+    bool closeDrawer = true,
+  }) async {
+    final List<ChatMessageRecord> rows = await _storage.listMessagesForSession(
+      sessionId,
+    );
+    final List<_ChatMessage> loaded = rows
+        .map((_fromRecord))
+        .toList(growable: false);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _activeSessionId = sessionId;
+      _messages = loaded;
+      _messageKeys
+        ..clear()
+        ..addAll(
+          List<GlobalKey>.generate(_messages.length, (_) => GlobalKey()),
+        );
+    });
+    if (closeDrawer && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+    _scrollToBottom();
+  }
+
+  _ChatMessage _fromRecord(ChatMessageRecord record) {
+    return _ChatMessage(
+      role: record.role == 'user' ? ChatRole.user : ChatRole.assistant,
+      text: record.text,
+    );
+  }
+
+  Future<void> _ensureModelInitialized() async {
+    if (_inference.isReady || !widget.modelReady) {
+      return;
+    }
+    final String? modelPath = widget.modelFilePath;
+    if (modelPath == null || modelPath.isEmpty) {
+      throw StateError(
+        'Model file path missing. Reinstall model from download page.',
+      );
+    }
+    setState(() {
+      _isPreparingModel = true;
+    });
+    try {
+      await _inference.ensureInitialized(modelPath: modelPath);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isPreparingModel = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _sendMessage() async {
     final String input = _controller.text.trim();
-    if (input.isEmpty) {
+    final String? sessionId = _activeSessionId;
+    if (input.isEmpty || sessionId == null || _isTyping || _isPreparingModel) {
       return;
     }
 
+    final DateTime now = DateTime.now();
     setState(() {
-      final int userMessageIndex = _messages.length;
-      _messages.add(_ChatMessage(role: _ChatRole.user, text: input));
+      _messages = <_ChatMessage>[
+        ..._messages,
+        _ChatMessage(role: ChatRole.user, text: input),
+      ];
       _messageKeys.add(GlobalKey());
-      _history.insert(
-        0,
-        _HistoryEntry(
-          label: input,
-          messageIndex: userMessageIndex,
-          createdAt: DateTime.now(),
-        ),
-      );
       _isTyping = true;
       _controller.clear();
     });
     _scrollToBottom();
 
-    Future<void>.delayed(const Duration(milliseconds: 550), () {
+    await _storage.addMessage(
+      sessionId: sessionId,
+      role: 'user',
+      text: input,
+      createdAtIso: now.toIso8601String(),
+    );
+
+    ChatSessionRecord? session;
+    for (final ChatSessionRecord s in _sessions) {
+      if (s.id == sessionId) {
+        session = s;
+        break;
+      }
+    }
+    if (session != null && session.title == 'New Chat') {
+      await _storage.renameSession(
+        id: sessionId,
+        title: _headlineFrom(input),
+        updatedAtIso: now.toIso8601String(),
+      );
+      await _refreshSessions();
+    }
+
+    try {
+      if (!widget.modelReady) {
+        throw StateError(
+          'Model is not installed yet. Please install model first from previous screen.',
+        );
+      }
+      await _ensureModelInitialized();
+      final String response = await _inference.complete(
+        history: _messages
+            .map((m) => ChatTurn(role: m.role, text: m.text))
+            .toList(growable: false),
+      );
+      final DateTime replyAt = DateTime.now();
       if (!mounted) {
         return;
       }
       setState(() {
-        _messages.add(
-          _ChatMessage(
-            role: _ChatRole.assistant,
-            text: widget.modelReady
-                ? 'Received: "$input"\n\nThis is chat UI mode. Connect your local inference call here.'
-                : 'Model is not installed yet. Please install model first from previous screen.',
-          ),
-        );
+        _messages = <_ChatMessage>[
+          ..._messages,
+          _ChatMessage(role: ChatRole.assistant, text: response),
+        ];
         _messageKeys.add(GlobalKey());
         _isTyping = false;
       });
       _scrollToBottom();
-    });
+      await _storage.addMessage(
+        sessionId: sessionId,
+        role: 'assistant',
+        text: response,
+        createdAtIso: replyAt.toIso8601String(),
+      );
+      await _refreshSessions();
+    } catch (error) {
+      final String message = error.toString().replaceFirst('StateError: ', '');
+      final DateTime replyAt = DateTime.now();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _messages = <_ChatMessage>[
+          ..._messages,
+          _ChatMessage(
+            role: ChatRole.assistant,
+            text: 'Could not generate offline reply: $message',
+          ),
+        ];
+        _messageKeys.add(GlobalKey());
+        _isTyping = false;
+      });
+      _scrollToBottom();
+      await _storage.addMessage(
+        sessionId: sessionId,
+        role: 'assistant',
+        text: 'Could not generate offline reply: $message',
+        createdAtIso: replyAt.toIso8601String(),
+      );
+      await _refreshSessions();
+    }
+  }
+
+  String _headlineFrom(String text) {
+    final String compact = text.replaceAll('\n', ' ').trim();
+    if (compact.isEmpty) {
+      return 'New Chat';
+    }
+    if (compact.length <= 40) {
+      return compact;
+    }
+    return '${compact.substring(0, 40)}...';
   }
 
   void _scrollToBottom() {
@@ -118,22 +291,6 @@ class _ChatPageState extends State<ChatPage> {
         duration: const Duration(milliseconds: 250),
         curve: Curves.easeOut,
       );
-    });
-  }
-
-  void _jumpToHistory(_HistoryEntry entry) {
-    Navigator.of(context).pop();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final BuildContext? targetContext =
-          _messageKeys[entry.messageIndex].currentContext;
-      if (targetContext != null) {
-        Scrollable.ensureVisible(
-          targetContext,
-          duration: const Duration(milliseconds: 260),
-          curve: Curves.easeOut,
-          alignment: 0.2,
-        );
-      }
     });
   }
 
@@ -213,42 +370,52 @@ class _ChatPageState extends State<ChatPage> {
                 onTap: _openSettings,
               ),
               const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.add_comment_outlined),
+                title: const Text('New Chat Session'),
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  await _createAndSwitchToNewSession();
+                },
+              ),
+              const Divider(height: 1),
+              const ListTile(
+                dense: true,
+                title: Text(
+                  'Session History',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
               Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  children: <Widget>[
-                    const ListTile(
-                      title: Text(
-                        'History',
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      dense: true,
-                    ),
-                    if (_history.isEmpty)
-                      const ListTile(
+                child: _sessions.isEmpty
+                    ? const ListTile(
                         leading: Icon(Icons.history_toggle_off_rounded),
-                        title: Text('No chat history yet'),
+                        title: Text('No sessions yet'),
                         dense: true,
                       )
-                    else
-                      ..._history.map((entry) {
-                        return ListTile(
-                          leading: const Icon(
-                            Icons.chat_bubble_outline_rounded,
-                          ),
-                          title: Text(
-                            entry.label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            '${entry.createdAt.hour.toString().padLeft(2, '0')}:${entry.createdAt.minute.toString().padLeft(2, '0')}',
-                          ),
-                          onTap: () => _jumpToHistory(entry),
-                        );
-                      }),
-                  ],
-                ),
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        itemCount: _sessions.length,
+                        itemBuilder: (BuildContext context, int index) {
+                          final ChatSessionRecord session = _sessions[index];
+                          final bool selected = session.id == _activeSessionId;
+                          return ListTile(
+                            selected: selected,
+                            leading: const Icon(
+                              Icons.chat_bubble_outline_rounded,
+                            ),
+                            title: Text(
+                              session.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Text(
+                              _formatSessionTime(session.updatedAtIso),
+                            ),
+                            onTap: () => _switchSession(session.id),
+                          );
+                        },
+                      ),
               ),
             ],
           ),
@@ -300,7 +467,9 @@ class _ChatPageState extends State<ChatPage> {
                         onSubmitted: (_) => _sendMessage(),
                         decoration: InputDecoration(
                           hintText: widget.modelReady
-                              ? 'Message Local AI...'
+                              ? _isPreparingModel
+                                    ? 'Preparing model...'
+                                    : 'Message Local AI...'
                               : 'Install model first to start local chat...',
                           filled: true,
                           fillColor: const Color(0xFFF5F7FB),
@@ -333,6 +502,14 @@ class _ChatPageState extends State<ChatPage> {
         ),
       ),
     );
+  }
+
+  String _formatSessionTime(String iso) {
+    final DateTime? dt = DateTime.tryParse(iso);
+    if (dt == null) {
+      return '';
+    }
+    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 }
 
@@ -423,24 +600,10 @@ class _ChatSettingsPage extends StatelessWidget {
   }
 }
 
-enum _ChatRole { user, assistant }
-
-class _HistoryEntry {
-  const _HistoryEntry({
-    required this.label,
-    required this.messageIndex,
-    required this.createdAt,
-  });
-
-  final String label;
-  final int messageIndex;
-  final DateTime createdAt;
-}
-
 class _ChatMessage {
   const _ChatMessage({required this.role, required this.text});
 
-  final _ChatRole role;
+  final ChatRole role;
   final String text;
 }
 
@@ -451,7 +614,7 @@ class _ChatBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool isUser = message.role == _ChatRole.user;
+    final bool isUser = message.role == ChatRole.user;
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
