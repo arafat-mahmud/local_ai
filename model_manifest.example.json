@@ -3,7 +3,7 @@
   "version_code": 3,
   "model_name": "SmolLM2-1.7B-Instruct-Q8_0",
   "file_name": "SmolLM2-1.7B-Instruct-Q8_0.gguf",
-  "file_url": "https://drive.google.com/file/d/1krpwv2FV7NQSf07_0l7h3Eozzc0T93wZ/view?usp=sharing",
+  "file_url": "https://huggingface.co/arafat-mahmud/smollm2-1.7b-q8-local-ai/resolve/main/SmolLM2-1.7B-Instruct-Q8_0.gguf",
   "file_size_bytes": 1820414944,
   "notes": "Updated model file link"
 }

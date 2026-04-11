@@ -8,7 +8,7 @@ import 'model_update_service.dart';
 const String kModelManifestUrl = String.fromEnvironment(
   'MODEL_MANIFEST_URL',
   defaultValue:
-      'https://drive.google.com/uc?export=download&id=1iRH0TAJsP6wvL9JxWKGOIEdW14A1RxsD',
+      'https://huggingface.co/arafat-mahmud/smollm2-1.7b-q8-local-ai/resolve/main/model_manifest.json',
 );
 
 class ModelManagerPage extends StatefulWidget {

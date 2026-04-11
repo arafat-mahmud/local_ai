@@ -12,7 +12,7 @@ Local AI Flutter app with internal model downloader and updater.
 
 ## Manifest Format
 
-Use the provided [model_manifest.example.json](model_manifest.example.json) format:
+Use the provided [model_manifest.example.json](model_manifest.example.json) format, and save/upload it as `model_manifest.json`:
 
 ```json
 {
@@ -20,7 +20,7 @@ Use the provided [model_manifest.example.json](model_manifest.example.json) form
   "version_code": 3,
   "model_name": "SmolLM2-1.7B-Instruct-Q8_0",
   "file_name": "SmolLM2-1.7B-Instruct-Q8_0.gguf",
-  "file_url": "https://drive.google.com/file/d/1krpwv2FV7NQSf07_0l7h3Eozzc0T93wZ/view?usp=sharing",
+  "file_url": "https://huggingface.co/arafat-mahmud/smollm2-1.7b-q8-local-ai/resolve/main/SmolLM2-1.7B-Instruct-Q8_0.gguf",
   "file_size_bytes": 1820414944,
   "notes": "Updated model file link"
 }
@@ -29,7 +29,7 @@ Use the provided [model_manifest.example.json](model_manifest.example.json) form
 ## Run With Your Manifest URL
 
 ```bash
-flutter run --dart-define=MODEL_MANIFEST_URL="https://drive.google.com/uc?export=download&id=1iRH0TAJsP6wvL9JxWKGOIEdW14A1RxsD"
+flutter run --dart-define=MODEL_MANIFEST_URL="https://huggingface.co/arafat-mahmud/smollm2-1.7b-q8-local-ai/resolve/main/model_manifest.json"
 ```
 
 ## Google Drive: Which Files To Upload
@@ -37,7 +37,7 @@ flutter run --dart-define=MODEL_MANIFEST_URL="https://drive.google.com/uc?export
 Upload these 2 files:
 
 1. Model binary file (example: `.gguf`)
-2. Manifest JSON file (same structure as `model_manifest.example.json`)
+2. Manifest JSON file named `model_manifest.json` (same structure as `model_manifest.example.json`)
 
 Important:
 
