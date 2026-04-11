@@ -437,7 +437,10 @@ class ModelUpdateService extends ChangeNotifier {
     try {
       return await _downloadManifest();
     } catch (error) {
-      if (!_shouldFallbackToDirectModel(error)) {
+      final bool allowDirectFallback =
+          probe.isLikelyModelBinary ||
+          _isLikelyDirectModelLink(config.manifestUrl, directUrl);
+      if (!allowDirectFallback || !_shouldFallbackToDirectModel(error)) {
         rethrow;
       }
       return _buildManifestFromDirectModelUrl(
@@ -517,15 +520,15 @@ String _fallbackFileName(String url) {
   try {
     final Uri uri = Uri.parse(url);
     final String? idValue = uri.queryParameters['id'];
-    if (idValue != null &&
-        idValue.isNotEmpty &&
-        uri.pathSegments.contains('download')) {
+    if (idValue != null && idValue.isNotEmpty) {
       return 'model_$idValue.gguf';
     }
 
     if (uri.pathSegments.isNotEmpty) {
       final String lastSegment = uri.pathSegments.last.trim();
-      if (lastSegment.isNotEmpty && lastSegment != 'download') {
+      if (lastSegment.isNotEmpty &&
+          lastSegment != 'download' &&
+          lastSegment != 'uc') {
         return lastSegment;
       }
     }
@@ -792,6 +795,39 @@ String _decodeHtmlEntities(String input) {
       .replaceAll('&quot;', '"')
       .replaceAll('&lt;', '<')
       .replaceAll('&gt;', '>');
+}
+
+bool _isLikelyDirectModelLink(String rawUrl, String convertedUrl) {
+  final String rawLower = rawUrl.toLowerCase();
+  final String convertedLower = convertedUrl.toLowerCase();
+
+  try {
+    final Uri rawUri = Uri.parse(rawUrl);
+    if (rawUri.host.contains('drive.google.com') &&
+        rawUri.path == '/file/d' &&
+        !rawUri.pathSegments.contains('view')) {
+      return false;
+    }
+    if (rawUri.host.contains('drive.google.com') &&
+        rawUri.queryParameters.containsKey('id') &&
+        (rawUri.path == '/uc' || rawUri.path == '/download')) {
+      return true;
+    }
+  } catch (_) {
+    // Ignore parse errors and continue with string heuristics.
+  }
+
+  if (rawLower.endsWith('.gguf') ||
+      rawLower.endsWith('.bin') ||
+      rawLower.endsWith('.onnx')) {
+    return true;
+  }
+  if (convertedLower.endsWith('.gguf') ||
+      convertedLower.endsWith('.bin') ||
+      convertedLower.endsWith('.onnx')) {
+    return true;
+  }
+  return false;
 }
 
 String? _extractGoogleDriveErrorMessage(String html) {
