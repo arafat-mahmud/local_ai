@@ -245,6 +245,15 @@ class ModelUpdateService extends ChangeNotifier {
       }
       tempFile.renameSync(destinationFile.path);
 
+      if (_looksLikeInvalidModelFile(destinationFile.path)) {
+        if (destinationFile.existsSync()) {
+          destinationFile.deleteSync();
+        }
+        throw const FormatException(
+          'Downloaded file is not a model binary (.gguf/.bin/.onnx). Check manifest file_url.',
+        );
+      }
+
       final InstalledModel installed = InstalledModel(
         version: model.version,
         versionCode: model.versionCode,
@@ -369,14 +378,19 @@ class ModelUpdateService extends ChangeNotifier {
       final Map<String, dynamic> parsed =
           jsonDecode(stored) as Map<String, dynamic>;
       final InstalledModel model = InstalledModel.fromJson(parsed);
-      if (model.filePath.isNotEmpty && File(model.filePath).existsSync()) {
+      if (model.filePath.isNotEmpty &&
+          File(model.filePath).existsSync() &&
+          !_looksLikeInvalidModelFile(model.filePath)) {
         installedModel = model;
         statusMessage = 'Installed model found. Ready for offline use.';
       } else {
+        if (model.filePath.isNotEmpty && File(model.filePath).existsSync()) {
+          File(model.filePath).deleteSync();
+        }
         installedModel = null;
         await prefs.remove(_installedModelKey);
         statusMessage =
-            'Model metadata found but file is missing. Please download again.';
+            'Model metadata invalid or file missing. Please download model again.';
       }
     } catch (error) {
       installedModel = null;
@@ -685,6 +699,19 @@ bool _looksLikeManifestFileName(String? fileName) {
     return false;
   }
   return lower.endsWith('.json') || lower.contains('manifest');
+}
+
+bool _looksLikeInvalidModelFile(String filePath) {
+  final String lower = filePath.toLowerCase();
+  if (_looksLikeManifestFileName(lower)) {
+    return true;
+  }
+  if (lower.endsWith('.gguf') ||
+      lower.endsWith('.bin') ||
+      lower.endsWith('.onnx')) {
+    return false;
+  }
+  return true;
 }
 
 String? _extractFilenameFromContentDisposition(String? value) {
