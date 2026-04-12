@@ -285,10 +285,10 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
               child: Padding(
                 padding: EdgeInsets.all(14),
                 child: Text(
-                  'Google Drive setup:\n'
+                  'Model host setup:\n'
                   '1) Upload your model file (for example: .gguf).\n'
                   '2) Upload your manifest JSON file (for example: model_manifest.json).\n'
-                  '3) Put the model Google Drive link in manifest file_url.\n'
+                  '3) Put the direct model link in manifest file_url.\n'
                   '4) In this app, use only the manifest file direct-download URL as MODEL_MANIFEST_URL.',
                   style: TextStyle(color: Colors.orange),
                 ),

@@ -32,7 +32,7 @@ Use the provided [model_manifest.example.json](model_manifest.example.json) form
 flutter run --dart-define=MODEL_MANIFEST_URL="https://huggingface.co/arafat-mahmud/smollm2-1.7b-q8-local-ai/resolve/main/model_manifest.json"
 ```
 
-## Google Drive: Which Files To Upload
+## Model Hosting: Which Files To Upload
 
 Upload these 2 files:
 
@@ -47,7 +47,7 @@ Important:
 
 ## Release Update Flow
 
-1. Upload new model file to Google Drive.
+1. Upload new model file to your model host.
 2. Update manifest `version_code` to a higher number.
 3. Update manifest `file_url`, `file_name`, and `file_size_bytes`.
 4. Keep same manifest URL.

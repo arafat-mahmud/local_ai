@@ -12,9 +12,9 @@ void main() {
     expect(find.text('Model Status'), findsOneWidget);
     expect(find.textContaining('Download Model'), findsOneWidget);
     await tester.pumpAndSettle();
-    final Finder googleDriveText = find.textContaining('Google Drive setup:');
-    if (googleDriveText.evaluate().isNotEmpty) {
-      expect(googleDriveText, findsOneWidget);
+    final Finder modelHostText = find.textContaining('Model host setup:');
+    if (modelHostText.evaluate().isNotEmpty) {
+      expect(modelHostText, findsOneWidget);
     }
   });
 }

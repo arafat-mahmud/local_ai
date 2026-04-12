@@ -356,15 +356,15 @@ class ModelUpdateService extends ChangeNotifier {
       }
 
       // Avoid showing a misleading 100% progress when only a tiny HTML
-      // interstitial/error page was downloaded from Google Drive.
+      // interstitial/error page was downloaded from the model host.
       downloadProgress = 0;
       downloadBytesReceived = 0;
       downloadTotalBytes = null;
 
       final String html = _readTextHead(tempFile);
-      final String? driveError = _extractGoogleDriveErrorMessage(html);
-      if (driveError != null) {
-        throw StateError(driveError);
+      final String? hostError = _extractHostDownloadErrorMessage(html);
+      if (hostError != null) {
+        throw StateError(hostError);
       }
 
       final String? mergedCookie = _mergeSetCookies(
@@ -400,7 +400,7 @@ class ModelUpdateService extends ChangeNotifier {
     }
 
     throw const FormatException(
-      'Download URL returned HTML instead of model binary. Check your manifest file_url and use a direct download link (Hugging Face resolve/Google Drive direct).',
+      'Download URL returned HTML instead of model binary. Check your manifest file_url and use a direct model binary link.',
     );
   }
 
@@ -1202,20 +1202,20 @@ bool _isLikelyDirectModelLink(String rawUrl, String convertedUrl) {
   return false;
 }
 
-String? _extractGoogleDriveErrorMessage(String html) {
+String? _extractHostDownloadErrorMessage(String html) {
   final String lower = html.toLowerCase();
   if (lower.contains('quota exceeded') ||
       lower.contains('too many users have viewed or downloaded this file')) {
-    return 'Google Drive quota exceeded for this file. Create a copy/re-upload the model to your own Drive or use another host, then update the model URL.';
+    return 'Download quota exceeded for this file. Re-upload to your model host or use another host, then update the model URL.';
   }
   if (lower.contains('you need access') ||
       lower.contains('request access') ||
       lower.contains('access denied')) {
-    return 'Google Drive file is not publicly accessible. Set link sharing to "Anyone with the link can view" and try again.';
+    return 'Model file is not publicly accessible. Update host permissions and try again.';
   }
   if (lower.contains('file you have requested does not exist') ||
       lower.contains('sorry, the file you have requested does not exist')) {
-    return 'Google Drive file was not found. Check the file link/id in the manifest.';
+    return 'Model file was not found. Check the file URL in the manifest.';
   }
   return null;
 }
