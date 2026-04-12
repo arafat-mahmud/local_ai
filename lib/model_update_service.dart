@@ -336,6 +336,9 @@ class ModelUpdateService extends ChangeNotifier {
 
       final String contentType =
           response.headers.value(Headers.contentTypeHeader) ?? '';
+      if (_isKnownModelBinaryFile(tempFile)) {
+        return;
+      }
       final bool isModelByHeaders = _looksLikeModelBinaryByHeaders(
         url: url,
         contentType: contentType,
@@ -995,11 +998,34 @@ bool _looksLikeHtmlFile(File file) {
   if (!file.existsSync()) {
     return false;
   }
+  if (_isKnownModelBinaryFile(file)) {
+    return false;
+  }
   final String head = _readTextHead(file).toLowerCase();
-  return head.contains('<!doctype html') ||
-      head.contains('<html') ||
-      head.contains('<head') ||
-      head.contains('google drive');
+  final String trimmed = head.trimLeft();
+  return trimmed.startsWith('<!doctype html') ||
+      trimmed.startsWith('<html') ||
+      trimmed.startsWith('<head');
+}
+
+bool _isKnownModelBinaryFile(File file) {
+  if (!file.existsSync()) {
+    return false;
+  }
+  final RandomAccessFile raf = file.openSync(mode: FileMode.read);
+  try {
+    if (raf.lengthSync() < 4) {
+      return false;
+    }
+    final List<int> bytes = raf.readSync(4);
+    return bytes.length == 4 &&
+        bytes[0] == 0x47 && // G
+        bytes[1] == 0x47 && // G
+        bytes[2] == 0x55 && // U
+        bytes[3] == 0x46; // F
+  } finally {
+    raf.closeSync();
+  }
 }
 
 String _readTextHead(File file, {int maxBytes = 262144}) {
