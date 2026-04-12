@@ -8,7 +8,8 @@ import 'chat_types.dart';
 
 class LocalInferenceService {
   static const String _systemInstruction =
-      'You are a helpful offline AI assistant inside a mobile app. Keep answers concise and clear.';
+      'You are a helpful offline AI assistant inside the PocketBrain mobile app. '
+      'Keep answers concise and clear.';
 
   double? _contextId;
   bool _isBusy = false;

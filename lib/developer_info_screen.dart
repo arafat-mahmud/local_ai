@@ -77,19 +77,34 @@ class _DeveloperInfoScreenState extends State<DeveloperInfoScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        CircleAvatar(
-                          radius: isSmallScreen ? 35 : 45,
-                          backgroundImage: const AssetImage(
-                            'assets/images/developer_avatar.png',
+                        Container(
+                          width: isSmallScreen ? 84 : 104,
+                          height: isSmallScreen ? 84 : 104,
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).cardColor,
+                            shape: BoxShape.circle,
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x1A000000),
+                                blurRadius: 14,
+                                offset: Offset(0, 6),
+                              ),
+                            ],
                           ),
-                          backgroundColor: Colors.transparent,
-                          child: Icon(
-                            Icons.person,
-                            size: isSmallScreen ? 40 : 50,
-                            color: Theme.of(context)
-                                .iconTheme
-                                .color
-                                ?.withValues(alpha: 0.5),
+                          child: ClipOval(
+                            child: Image.asset(
+                              'assets/images/developer_avatar.png',
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => Icon(
+                                Icons.person,
+                                size: isSmallScreen ? 40 : 50,
+                                color: Theme.of(context)
+                                    .iconTheme
+                                    .color
+                                    ?.withValues(alpha: 0.5),
+                              ),
+                            ),
                           ),
                         ),
                         SizedBox(height: isSmallScreen ? 10 : 15),
@@ -120,10 +135,10 @@ class _DeveloperInfoScreenState extends State<DeveloperInfoScreen> {
                         SizedBox(height: isSmallScreen ? 15 : 20),
                         _buildInfoCard(
                           context,
-                          title: 'Expense Tracker',
+                          title: 'PocketBrain',
                           titleFontSize: isSmallScreen ? 14 : 15,
                           content:
-                              'A comprehensive expense tracking application for personal finance management, featuring categorized expenses, budget tracking, and detailed analytics.',
+                              'PocketBrain is an offline AI chat application that runs local models directly on your device for private, fast, and reliable everyday assistance.',
                           contentFontSize: isSmallScreen ? 10 : 11,
                         ),
                         SizedBox(height: isSmallScreen ? 8 : 10),
@@ -180,7 +195,7 @@ class _DeveloperInfoScreenState extends State<DeveloperInfoScreen> {
             Row(
               children: [
                 Icon(
-                  Icons.account_balance_wallet,
+                  Icons.smart_toy_outlined,
                   color: Theme.of(context).primaryColor,
                 ),
                 const SizedBox(width: 10),
