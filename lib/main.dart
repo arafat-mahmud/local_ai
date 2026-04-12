@@ -13,11 +13,11 @@ class LocalAiApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Local AI',
+      title: 'PocketBrain',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF005B96)),
       ),
-      home: const ModelManagerPage(title: 'Local AI'),
+      home: const ModelManagerPage(title: 'PocketBrain'),
     );
   }
 }

@@ -5,6 +5,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import 'chat_storage_service.dart';
 import 'chat_types.dart';
+import 'developer_info_screen.dart';
 import 'local_inference_service.dart';
 import 'model_update_service.dart';
 
@@ -135,7 +136,7 @@ class _ChatPageState extends State<ChatPage> {
         return;
       }
       setState(() {
-        _appVersion = '${info.version} (${info.buildNumber})';
+        _appVersion = '${info.version}+${info.buildNumber}';
       });
     } catch (_) {
       if (!mounted) {
@@ -468,7 +469,7 @@ class _ChatPageState extends State<ChatPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Local AI Chat'),
+        title: const Text('PocketBrain'),
         actions: <Widget>[
           Padding(
             padding: const EdgeInsets.only(right: 12),
@@ -633,7 +634,7 @@ class _ChatPageState extends State<ChatPage> {
                           hintText: widget.modelReady
                               ? _isPreparingModel
                                     ? 'Preparing model...'
-                                    : 'Message Local AI...'
+                                    : 'Message PocketBrain...'
                               : 'Install model first to start local chat...',
                           filled: true,
                           fillColor: const Color(0xFFF5F7FB),
@@ -753,6 +754,35 @@ class _ChatSettingsPage extends StatelessWidget {
                     },
                     icon: const Icon(Icons.verified_outlined),
                     label: const Text('Check App Version'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  const Text(
+                    'Developer',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('About the developer and contact details.'),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const DeveloperInfoScreen(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.person_outline_rounded),
+                    label: const Text('About Developer'),
                   ),
                 ],
               ),

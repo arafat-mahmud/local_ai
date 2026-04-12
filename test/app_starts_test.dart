@@ -8,7 +8,7 @@ void main() {
     await tester.pumpWidget(const LocalAiApp());
     await tester.pumpAndSettle();
 
-    expect(find.text('Local AI'), findsWidgets);
+    expect(find.text('PocketBrain'), findsWidgets);
     expect(find.text('Model Status'), findsOneWidget);
     expect(find.textContaining('Download Model'), findsOneWidget);
     await tester.pumpAndSettle();

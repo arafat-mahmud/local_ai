@@ -107,7 +107,7 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
       MaterialPageRoute<void>(
         builder: (_) => ChatPage(
           modelReady: installed != null,
-          modelLabel: installed?.modelName ?? 'Local AI',
+          modelLabel: installed?.modelName ?? 'PocketBrain',
           hasModelUpdate: _service.hasUpdateAvailable,
           modelFilePath: installed?.filePath,
           startNewSessionOnLaunch: false,

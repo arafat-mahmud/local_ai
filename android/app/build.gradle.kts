@@ -27,7 +27,7 @@ android {
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        versionName = "${flutter.versionName}+${flutter.versionCode}"
         ndk {
             abiFilters += "arm64-v8a"
         }
