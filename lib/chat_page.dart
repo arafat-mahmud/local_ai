@@ -12,12 +12,14 @@ class ChatPage extends StatefulWidget {
     required this.modelLabel,
     required this.hasModelUpdate,
     this.modelFilePath,
+    this.startNewSessionOnLaunch = false,
   });
 
   final bool modelReady;
   final String modelLabel;
   final bool hasModelUpdate;
   final String? modelFilePath;
+  final bool startNewSessionOnLaunch;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -74,7 +76,7 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _initializeChatData() async {
     await _refreshSessions();
-    if (_sessions.isEmpty) {
+    if (widget.startNewSessionOnLaunch || _sessions.isEmpty) {
       await _createAndSwitchToNewSession();
       return;
     }

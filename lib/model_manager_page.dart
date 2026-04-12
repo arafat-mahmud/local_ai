@@ -22,6 +22,7 @@ class ModelManagerPage extends StatefulWidget {
 
 class _ModelManagerPageState extends State<ModelManagerPage> {
   late final ModelUpdateService _service;
+  bool _didAutoOpenChat = false;
 
   @override
   void initState() {
@@ -41,9 +42,40 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
   }
 
   void _onServiceChanged() {
+    _maybeAutoOpenChat();
     if (mounted) {
       setState(() {});
     }
+  }
+
+  Future<void> _maybeAutoOpenChat() async {
+    if (_didAutoOpenChat || !mounted) {
+      return;
+    }
+    final InstalledModel? installed = _service.installedModel;
+    final bool isBusy = _service.isCheckingForUpdates || _service.isDownloading;
+    if (installed == null || isBusy) {
+      return;
+    }
+    _didAutoOpenChat = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute<void>(
+            builder: (_) => ChatPage(
+              modelReady: true,
+              modelLabel: installed.modelName,
+              hasModelUpdate: _service.hasUpdateAvailable,
+              modelFilePath: installed.filePath,
+              startNewSessionOnLaunch: true,
+            ),
+          ),
+        ),
+      );
+    });
   }
 
   Future<void> _checkUpdate() async {
@@ -78,6 +110,7 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
           modelLabel: installed?.modelName ?? 'Local AI',
           hasModelUpdate: _service.hasUpdateAvailable,
           modelFilePath: installed?.filePath,
+          startNewSessionOnLaunch: false,
         ),
       ),
     );
@@ -88,6 +121,8 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
     final InstalledModel? installed = _service.installedModel;
     final RemoteModelManifest? latest = _service.latestManifest;
     final bool hasUpdate = _service.hasUpdateAvailable;
+    final bool canDownloadOrUpdate =
+        installed == null || hasUpdate;
     final bool downloading = _service.isDownloading;
     final bool checking = _service.isCheckingForUpdates;
 
@@ -252,14 +287,16 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
                 label: Text(checking ? 'Checking...' : 'Check Update'),
               ),
               FilledButton.icon(
-                onPressed: downloading ? null : _downloadOrUpdate,
+                onPressed: (downloading || !canDownloadOrUpdate)
+                    ? null
+                    : _downloadOrUpdate,
                 icon: const Icon(Icons.download),
                 label: Text(
                   installed == null
                       ? 'Download Model'
                       : hasUpdate
                       ? 'Update Model'
-                      : 'Reinstall Model',
+                      : 'Model Up to Date',
                 ),
               ),
               OutlinedButton.icon(
