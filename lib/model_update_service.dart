@@ -196,10 +196,7 @@ class ModelUpdateService extends ChangeNotifier {
     }
 
     final RemoteModelManifest model = latestManifest!;
-    final Directory baseDir = await getApplicationSupportDirectory();
-    final Directory modelsDir = Directory(
-      '${baseDir.path}/${config.storageFolderName}',
-    );
+    final Directory modelsDir = await _resolveModelsDirectory();
     if (!modelsDir.existsSync()) {
       modelsDir.createSync(recursive: true);
     }
@@ -207,7 +204,10 @@ class ModelUpdateService extends ChangeNotifier {
     final File destinationFile = File('${modelsDir.path}/${model.fileName}');
     final File tempFile = File('${destinationFile.path}.download');
     final InstalledModel? previous = installedModel;
-    final String downloadUrl = _toDirectDownloadUrl(model.fileUrl);
+    final String downloadUrl = _normalizeModelDownloadUrl(
+      rawUrl: model.fileUrl,
+      fileName: model.fileName,
+    );
 
     isDownloading = true;
     downloadProgress = 0;
@@ -226,6 +226,7 @@ class ModelUpdateService extends ChangeNotifier {
         initialUrl: downloadUrl,
         tempFile: tempFile,
         modelName: model.modelName,
+        fileName: model.fileName,
       );
 
       if (!tempFile.existsSync()) {
@@ -280,7 +281,15 @@ class ModelUpdateService extends ChangeNotifier {
       downloadTotalBytes = destinationFile.lengthSync();
     } catch (error) {
       lastError = error.toString();
-      statusMessage = 'Model download failed. Please try again.';
+      if (_isNoSpaceLeftError(error)) {
+        await _deletePartialDownloads(modelsDir);
+        statusMessage =
+            'Not enough storage to install model. Please free device storage and retry.';
+        lastError =
+            'Insufficient storage (No space left on device). Required: ${_readableBytes(model.fileSizeBytes)}.';
+      } else {
+        statusMessage = 'Model download failed. Please try again.';
+      }
       if (tempFile.existsSync()) {
         tempFile.deleteSync();
       }
@@ -295,6 +304,7 @@ class ModelUpdateService extends ChangeNotifier {
     required String initialUrl,
     required File tempFile,
     required String modelName,
+    required String fileName,
   }) async {
     String url = initialUrl;
     String? cookieHeader;
@@ -326,8 +336,18 @@ class ModelUpdateService extends ChangeNotifier {
 
       final String contentType =
           response.headers.value(Headers.contentTypeHeader) ?? '';
-      final bool looksHtml =
-          _looksLikeHtmlResponse(contentType) || _looksLikeHtmlFile(tempFile);
+      final bool isModelByHeaders = _looksLikeModelBinaryByHeaders(
+        url: url,
+        contentType: contentType,
+        contentDisposition: response.headers.value('content-disposition'),
+        contentLength: _parseInt(response.headers.value(Headers.contentLengthHeader)),
+      );
+      final bool looksHtmlByFile = _looksLikeHtmlFile(tempFile);
+      if (isModelByHeaders && !looksHtmlByFile) {
+        return;
+      }
+      final bool looksHtmlByType = _looksLikeHtmlResponse(contentType);
+      final bool looksHtml = looksHtmlByType || looksHtmlByFile;
       if (!looksHtml) {
         return;
       }
@@ -352,21 +372,32 @@ class ModelUpdateService extends ChangeNotifier {
         cookieHeader = mergedCookie;
       }
 
-      final String? retryUrl = _extractGoogleDriveConfirmedDownloadUrl(
+      final String? retryUrl = _extractRetryDownloadUrlFromHtml(
         html: html,
         originalUrl: url,
       );
-      if (retryUrl == null || retryUrl == url) {
-        break;
+      if (retryUrl != null && retryUrl != url) {
+        statusMessage = 'Download page detected. Retrying with direct file link...';
+        notifyListeners();
+        url = retryUrl;
+        continue;
       }
 
-      statusMessage = 'Confirming Google Drive download and retrying...';
-      notifyListeners();
-      url = retryUrl;
+      final String fallbackDirectUrl = _normalizeModelDownloadUrl(
+        rawUrl: initialUrl,
+        fileName: fileName,
+      );
+      if (fallbackDirectUrl != url) {
+        statusMessage = 'Retrying with model file direct URL...';
+        notifyListeners();
+        url = fallbackDirectUrl;
+        continue;
+      }
+      break;
     }
 
     throw const FormatException(
-      'Download URL returned HTML instead of model binary. Check Google Drive sharing/direct link.',
+      'Download URL returned HTML instead of model binary. Check your manifest file_url and use a direct download link (Hugging Face resolve/Google Drive direct).',
     );
   }
 
@@ -545,6 +576,70 @@ class ModelUpdateService extends ChangeNotifier {
   }
 }
 
+Future<Directory> _resolveModelsDirectory() async {
+  final Directory supportDir = await getApplicationSupportDirectory();
+  final List<Directory> candidateRoots = <Directory>[
+    if (Platform.isAndroid) ...<Directory>[
+      if (await getExternalStorageDirectory() case final Directory ext) ext,
+    ],
+    supportDir,
+  ];
+
+  for (final Directory root in candidateRoots) {
+    final Directory dir = Directory('${root.path}/models');
+    if (_canWriteToDirectory(dir)) {
+      return dir;
+    }
+  }
+
+  return Directory('${supportDir.path}/models');
+}
+
+bool _canWriteToDirectory(Directory directory) {
+  try {
+    if (!directory.existsSync()) {
+      directory.createSync(recursive: true);
+    }
+    final File probe = File('${directory.path}/.write_test');
+    probe.writeAsStringSync('ok', flush: true);
+    probe.deleteSync();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<void> _deletePartialDownloads(Directory modelsDir) async {
+  if (!modelsDir.existsSync()) {
+    return;
+  }
+  for (final FileSystemEntity entity in modelsDir.listSync()) {
+    if (entity is File && entity.path.endsWith('.download')) {
+      try {
+        entity.deleteSync();
+      } catch (_) {
+        // Keep going for other stale partial downloads.
+      }
+    }
+  }
+}
+
+bool _isNoSpaceLeftError(Object error) {
+  if (error is FileSystemException) {
+    final String lower = error.toString().toLowerCase();
+    return lower.contains('no space left on device') ||
+        lower.contains('errno = 28') ||
+        lower.contains('errno 28');
+  }
+  if (error is DioException) {
+    final String lower = error.toString().toLowerCase();
+    return lower.contains('no space left on device') ||
+        lower.contains('errno = 28') ||
+        lower.contains('errno 28');
+  }
+  return false;
+}
+
 String _fallbackFileName(String url) {
   try {
     final Uri uri = Uri.parse(url);
@@ -612,10 +707,33 @@ String _toDirectDownloadUrl(String rawUrl) {
     final int blobIndex = segments.indexOf('blob');
     if (blobIndex != -1) {
       segments[blobIndex] = 'resolve';
-      return uri.replace(pathSegments: segments).toString();
+      return _ensureHuggingFaceDownloadQuery(
+        uri.replace(pathSegments: segments).toString(),
+      );
+    }
+    final int treeIndex = segments.indexOf('tree');
+    if (treeIndex != -1) {
+      segments[treeIndex] = 'resolve';
+      return _ensureHuggingFaceDownloadQuery(
+        uri.replace(pathSegments: segments).toString(),
+      );
     }
     if (segments.contains('resolve')) {
-      return rawUrl;
+      return _ensureHuggingFaceDownloadQuery(rawUrl);
+    }
+    if (segments.length >= 3 &&
+        _looksLikeModelFileName(segments.last) &&
+        segments[2] != 'resolve') {
+      final List<String> rewritten = <String>[
+        segments[0],
+        segments[1],
+        'resolve',
+        'main',
+        ...segments.sublist(2),
+      ];
+      return _ensureHuggingFaceDownloadQuery(
+        uri.replace(pathSegments: rewritten).toString(),
+      );
     }
   }
 
@@ -660,6 +778,74 @@ String _toDirectDownloadUrl(String rawUrl) {
     'id': fileId,
     'export': 'download',
   }).toString();
+}
+
+String _normalizeModelDownloadUrl({
+  required String rawUrl,
+  required String fileName,
+}) {
+  final String direct = _toDirectDownloadUrl(rawUrl);
+  final Uri uri = Uri.parse(direct);
+  final String host = uri.host.toLowerCase();
+
+  if (!host.contains('huggingface.co')) {
+    return direct;
+  }
+
+  final List<String> segments = List<String>.from(uri.pathSegments);
+  if (segments.length >= 4 && segments[2] == 'resolve') {
+    final String last = segments.last.toLowerCase();
+    if (last == fileName.toLowerCase()) {
+      return _ensureHuggingFaceDownloadQuery(direct);
+    }
+    if (_looksLikeModelFileName(last)) {
+      segments[segments.length - 1] = fileName;
+      return _ensureHuggingFaceDownloadQuery(
+        uri.replace(pathSegments: segments).toString(),
+      );
+    }
+    if (!_looksLikeModelFileName(last)) {
+      return _ensureHuggingFaceDownloadQuery(
+        uri.replace(pathSegments: <String>[
+          ...segments,
+          fileName,
+        ]).toString(),
+      );
+    }
+  }
+
+  if (segments.length >= 2 && !segments.contains('resolve')) {
+    return _ensureHuggingFaceDownloadQuery(
+      uri.replace(pathSegments: <String>[
+        segments[0],
+        segments[1],
+        'resolve',
+        'main',
+        fileName,
+      ]).toString(),
+    );
+  }
+
+  return _ensureHuggingFaceDownloadQuery(direct);
+}
+
+String _ensureHuggingFaceDownloadQuery(String url) {
+  final Uri parsed = Uri.parse(url);
+  if (!parsed.host.toLowerCase().contains('huggingface.co')) {
+    return url;
+  }
+  final Map<String, String> query = <String, String>{
+    ...parsed.queryParameters,
+    'download': 'true',
+  };
+  return parsed.replace(queryParameters: query).toString();
+}
+
+bool _looksLikeModelFileName(String value) {
+  final String lower = value.toLowerCase();
+  return lower.endsWith('.gguf') ||
+      lower.endsWith('.bin') ||
+      lower.endsWith('.onnx');
 }
 
 bool _shouldFallbackToDirectModel(Object error) {
@@ -782,6 +968,21 @@ bool _looksLikeHtmlResponse(String? contentType) {
       normalized.contains('application/xhtml+xml');
 }
 
+bool _looksLikeModelBinaryByHeaders({
+  required String url,
+  required String? contentType,
+  required String? contentDisposition,
+  required int? contentLength,
+}) {
+  final _RemoteProbe probe = _RemoteProbe.fromHeaders(
+    url: url,
+    contentType: contentType,
+    contentDisposition: contentDisposition,
+    contentLength: contentLength,
+  );
+  return probe.isLikelyModelBinary;
+}
+
 bool _looksLikeHtmlText(String text) {
   final String lower = text.toLowerCase();
   return lower.startsWith('<!doctype html') ||
@@ -883,6 +1084,53 @@ String? _extractGoogleDriveConfirmedDownloadUrl({
     return _decodeHtmlEntities(decoded);
   }
 
+  return null;
+}
+
+String? _extractRetryDownloadUrlFromHtml({
+  required String html,
+  required String originalUrl,
+}) {
+  final Uri uri = Uri.parse(originalUrl);
+  final String host = uri.host.toLowerCase();
+  if (host.contains('drive.google.com')) {
+    return _extractGoogleDriveConfirmedDownloadUrl(
+      html: html,
+      originalUrl: originalUrl,
+    );
+  }
+  if (host.contains('huggingface.co')) {
+    final String? fromHtml = _extractHuggingFaceResolvedDownloadUrl(html, uri);
+    if (fromHtml != null) {
+      return _ensureHuggingFaceDownloadQuery(fromHtml);
+    }
+    final String normalized = _toDirectDownloadUrl(originalUrl);
+    if (normalized != originalUrl) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
+String? _extractHuggingFaceResolvedDownloadUrl(String html, Uri original) {
+  final RegExp hrefPattern = RegExp(r'href="([^"]+)"', caseSensitive: false);
+  final RegExp modelPathPattern = RegExp(
+    r'/[^/]+/[^/]+/resolve/[^"\s]+\.(gguf|bin|onnx)(\?[^"\s]*)?$',
+    caseSensitive: false,
+  );
+  for (final Match match in hrefPattern.allMatches(html)) {
+    String candidate = _decodeHtmlEntities(match.group(1)!);
+    if (candidate.isEmpty) {
+      continue;
+    }
+    final Uri resolved = original.resolve(candidate);
+    if (!resolved.host.toLowerCase().contains('huggingface.co')) {
+      continue;
+    }
+    if (modelPathPattern.hasMatch(resolved.path)) {
+      return resolved.toString();
+    }
+  }
   return null;
 }
 
