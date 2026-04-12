@@ -96,11 +96,18 @@ class LocalInferenceService {
         penaltyRepeat: 1.08,
         penaltyLastN: 128,
         emitRealtimeCompletion: false,
-        stop: <String>['<|im_end|>', 'USER:', '\nUser:'],
+        stop: <String>[
+          '<|im_end|>',
+          '<|endoftext|>',
+          'USER:',
+          '\nUser:',
+          '\nHuman:',
+          '\nAssistant:',
+        ],
       );
-      final String text = (result?['text'] ?? result?['content'] ?? '')
-          .toString()
-          .trim();
+      final String text = _sanitizeAssistantReply(
+        (result?['text'] ?? result?['content'] ?? '').toString(),
+      );
       if (text.isEmpty) {
         throw StateError('Model returned an empty response.');
       }
@@ -122,6 +129,31 @@ class LocalInferenceService {
     }
     buffer.write('Assistant:');
     return buffer.toString();
+  }
+
+  String _sanitizeAssistantReply(String raw) {
+    String text = raw.trim();
+    const List<String> cutMarkers = <String>[
+      '<|endoftext|>',
+      '<|im_end|>',
+      '\nHuman:',
+      '\nUser:',
+      '\nAssistant:',
+      'Human:',
+      'User:',
+      'Assistant:',
+    ];
+    int? cutAt;
+    for (final String marker in cutMarkers) {
+      final int index = text.indexOf(marker);
+      if (index > 0 && (cutAt == null || index < cutAt)) {
+        cutAt = index;
+      }
+    }
+    if (cutAt != null) {
+      text = text.substring(0, cutAt).trim();
+    }
+    return text;
   }
 
   Future<void> dispose() async {

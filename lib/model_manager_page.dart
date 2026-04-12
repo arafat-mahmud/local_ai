@@ -63,7 +63,7 @@ class _ModelManagerPageState extends State<ModelManagerPage> {
         return;
       }
       unawaited(
-        Navigator.of(context).pushReplacement(
+        Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) => ChatPage(
               modelReady: true,

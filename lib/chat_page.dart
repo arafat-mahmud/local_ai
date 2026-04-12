@@ -1,9 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'chat_storage_service.dart';
 import 'chat_types.dart';
 import 'local_inference_service.dart';
+import 'model_update_service.dart';
+
+const String kChatModelManifestUrl = String.fromEnvironment(
+  'MODEL_MANIFEST_URL',
+  defaultValue:
+      'https://huggingface.co/arafat-mahmud/smollm2-1.7b-q8-local-ai/resolve/main/model_manifest.json',
+);
 
 class ChatPage extends StatefulWidget {
   const ChatPage({
@@ -26,33 +35,97 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> {
+  static const String _initialAssistantGreeting =
+      'Hi. I am ready. Downloaded model can answer here in offline mode.';
+
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final List<GlobalKey> _messageKeys = <GlobalKey>[];
   final ChatStorageService _storage = ChatStorageService.instance;
   final LocalInferenceService _inference = LocalInferenceService();
+  late final ModelUpdateService _modelService;
 
   List<_ChatMessage> _messages = <_ChatMessage>[];
   List<ChatSessionRecord> _sessions = <ChatSessionRecord>[];
   String? _activeSessionId;
+  bool _activeSessionPersisted = false;
 
   bool _isTyping = false;
   bool _isPreparingModel = false;
   String _appVersion = 'Loading...';
+  bool _hasModelUpdateLive = false;
+  RemoteModelManifest? _latestManifest;
+  bool _blinkOn = true;
+  Timer? _blinkTimer;
+  Timer? _updatePollTimer;
 
   @override
   void initState() {
     super.initState();
+    _modelService = ModelUpdateService(
+      config: const ModelUpdateConfig(manifestUrl: kChatModelManifestUrl),
+    );
+    _hasModelUpdateLive = widget.hasModelUpdate;
+    _setupBlinking();
     _loadAppVersion();
     _initializeChatData();
+    unawaited(_refreshModelUpdateStatus(fullInit: true));
+    _startUpdatePolling();
   }
 
   @override
   void dispose() {
+    _blinkTimer?.cancel();
+    _updatePollTimer?.cancel();
+    _modelService.dispose();
     _controller.dispose();
     _scrollController.dispose();
     _inference.dispose();
     super.dispose();
+  }
+
+  void _setupBlinking() {
+    if (!_hasModelUpdateLive) {
+      _blinkTimer?.cancel();
+      _blinkOn = true;
+      return;
+    }
+    _blinkTimer?.cancel();
+    _blinkTimer = Timer.periodic(const Duration(milliseconds: 700), (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _blinkOn = !_blinkOn;
+      });
+    });
+  }
+
+  void _startUpdatePolling() {
+    _updatePollTimer?.cancel();
+    _updatePollTimer = Timer.periodic(const Duration(minutes: 2), (_) {
+      unawaited(_refreshModelUpdateStatus());
+    });
+  }
+
+  Future<void> _refreshModelUpdateStatus({bool fullInit = false}) async {
+    try {
+      if (fullInit) {
+        await _modelService.initialize(autoCheckRemote: true);
+      } else {
+        await _modelService.checkForUpdates();
+      }
+    } catch (_) {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _hasModelUpdateLive = _modelService.hasUpdateAvailable;
+      _latestManifest = _modelService.latestManifest;
+    });
+    _setupBlinking();
   }
 
   Future<void> _loadAppVersion() async {
@@ -96,19 +169,23 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _createAndSwitchToNewSession() async {
     final DateTime now = DateTime.now();
     final String sessionId = 'session_${now.microsecondsSinceEpoch}';
-    await _storage.createSession(
-      id: sessionId,
-      title: 'New Chat',
-      createdAtIso: now.toIso8601String(),
-    );
-    await _storage.addMessage(
-      sessionId: sessionId,
-      role: 'assistant',
-      text: 'Hi. I am ready. Downloaded model can answer here in offline mode.',
-      createdAtIso: now.toIso8601String(),
-    );
-    await _refreshSessions();
-    await _switchSession(sessionId, closeDrawer: false);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _activeSessionId = sessionId;
+      _activeSessionPersisted = false;
+      _messages = <_ChatMessage>[
+        const _ChatMessage(
+          role: ChatRole.assistant,
+          text: _initialAssistantGreeting,
+        ),
+      ];
+      _messageKeys
+        ..clear()
+        ..add(GlobalKey());
+    });
+    _scrollToBottom();
   }
 
   Future<void> _switchSession(
@@ -126,6 +203,7 @@ class _ChatPageState extends State<ChatPage> {
     }
     setState(() {
       _activeSessionId = sessionId;
+      _activeSessionPersisted = true;
       _messages = loaded;
       _messageKeys
         ..clear()
@@ -189,6 +267,27 @@ class _ChatPageState extends State<ChatPage> {
     });
     _scrollToBottom();
 
+    if (!_activeSessionPersisted) {
+      final String title = _headlineFrom(input);
+      await _storage.createSession(
+        id: sessionId,
+        title: title,
+        createdAtIso: now.toIso8601String(),
+      );
+      if (_messages.isNotEmpty &&
+          _messages.first.role == ChatRole.assistant &&
+          _messages.first.text == _initialAssistantGreeting) {
+        await _storage.addMessage(
+          sessionId: sessionId,
+          role: 'assistant',
+          text: _initialAssistantGreeting,
+          createdAtIso: now.toIso8601String(),
+        );
+      }
+      _activeSessionPersisted = true;
+      await _refreshSessions();
+    }
+
     await _storage.addMessage(
       sessionId: sessionId,
       role: 'user',
@@ -245,7 +344,7 @@ class _ChatPageState extends State<ChatPage> {
       );
       await _refreshSessions();
     } catch (error) {
-      final String message = error.toString().replaceFirst('StateError: ', '');
+      final String message = _friendlyInferenceError(error);
       final DateTime replyAt = DateTime.now();
       if (!mounted) {
         return;
@@ -255,7 +354,7 @@ class _ChatPageState extends State<ChatPage> {
           ..._messages,
           _ChatMessage(
             role: ChatRole.assistant,
-            text: 'Could not generate offline reply: $message',
+            text: message,
           ),
         ];
         _messageKeys.add(GlobalKey());
@@ -265,7 +364,7 @@ class _ChatPageState extends State<ChatPage> {
       await _storage.addMessage(
         sessionId: sessionId,
         role: 'assistant',
-        text: 'Could not generate offline reply: $message',
+        text: message,
         createdAtIso: replyAt.toIso8601String(),
       );
       await _refreshSessions();
@@ -281,6 +380,54 @@ class _ChatPageState extends State<ChatPage> {
       return compact;
     }
     return '${compact.substring(0, 40)}...';
+  }
+
+  String _friendlyInferenceError(Object error) {
+    final String raw = error.toString().replaceFirst('StateError: ', '');
+    if (raw.contains('Model context is not initialized')) {
+      return 'Model is not ready yet. Please reopen chat and try again.';
+    }
+    if (raw.contains('Model is busy')) {
+      return 'Model is generating another reply. Please wait and send again.';
+    }
+    return 'Sorry, I could not generate a clean offline reply. Please try again.';
+  }
+
+  Future<void> _showModelBadgeInfo() async {
+    await _refreshModelUpdateStatus();
+    if (!mounted) {
+      return;
+    }
+    final String title = _hasModelUpdateLive ? 'Update Available' : 'Model Active';
+    final String details;
+    if (_hasModelUpdateLive && _latestManifest != null) {
+      details =
+          'Installed: ${widget.modelLabel}\n'
+          'Latest: ${_latestManifest!.modelName}\n'
+          'Version: ${_latestManifest!.version} (${_latestManifest!.versionCode})\n\n'
+          'Open Download/Update Page to install this update.';
+    } else if (_hasModelUpdateLive) {
+      details =
+          'A new model update is available.\n'
+          'Open Download/Update Page to see and install it.';
+    } else {
+      details = 'Current model is active and up to date.';
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(title),
+          content: Text(details),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _scrollToBottom() {
@@ -304,7 +451,7 @@ class _ChatPageState extends State<ChatPage> {
             builder: (_) => _ChatSettingsPage(
               modelReady: widget.modelReady,
               modelLabel: widget.modelLabel,
-              hasModelUpdate: widget.hasModelUpdate,
+              hasModelUpdate: _hasModelUpdateLive,
               appVersion: _appVersion,
             ),
           ),
@@ -332,19 +479,34 @@ class _ChatPageState extends State<ChatPage> {
                   vertical: 5,
                 ),
                 decoration: BoxDecoration(
-                  color: widget.modelReady
+                  color: _hasModelUpdateLive
+                      ? Colors.red.withValues(alpha: _blinkOn ? 0.20 : 0.08)
+                      : widget.modelReady
                       ? Colors.green.withValues(alpha: 0.14)
                       : Colors.orange.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(999),
                 ),
-                child: Text(
-                  widget.modelReady ? widget.modelLabel : 'Model Not Installed',
-                  style: TextStyle(
-                    color: widget.modelReady
-                        ? const Color(0xFF146C2E)
-                        : const Color(0xFF9A5800),
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(999),
+                  onTap: _showModelBadgeInfo,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Text(
+                      _hasModelUpdateLive
+                          ? 'update'
+                          : widget.modelReady
+                          ? 'active'
+                          : 'Model Not Installed',
+                      style: TextStyle(
+                        color: _hasModelUpdateLive
+                            ? const Color(0xFFB00020)
+                            : widget.modelReady
+                            ? const Color(0xFF146C2E)
+                            : const Color(0xFF9A5800),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                      ),
+                    ),
                   ),
                 ),
               ),
